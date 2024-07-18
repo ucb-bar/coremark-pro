@@ -429,7 +429,7 @@ EXTERN(void) cjzero_far JPP((void FAR * target, size_t bytestozero));
 #if 0                /* This table is not actually needed in v6a */
 extern const int jpeg_zigzag_order[]; /* natural coef order to zigzag order */
 #endif
-extern const int cjpeg_natural_order[]; /* zigzag coef order to natural order */
+extern const char cjpeg_natural_order[]; /* zigzag coef order to natural order */
 
 /* Suppress undefined-structure complaints if necessary. */
 

@@ -1,12 +1,12 @@
 /*
-(C) 2014 EEMBC(R).  All rights reserved.                            
+(C) 2014 EEMBC(R).  All rights reserved.
 
-All EEMBC Benchmark Software are products of EEMBC 
-and are provided under the terms of the EEMBC Benchmark License Agreements.  
-The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members 
-and is protected under all applicable laws, including all applicable copyright laws.  
-If you received this EEMBC Benchmark Software without having 
-a currently effective EEMBC Benchmark License Agreement, you must discontinue use. 
+All EEMBC Benchmark Software are products of EEMBC
+and are provided under the terms of the EEMBC Benchmark License Agreements.
+The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members
+and is protected under all applicable laws, including all applicable copyright laws.
+If you received this EEMBC Benchmark Software without having
+a currently effective EEMBC Benchmark License Agreement, you must discontinue use.
 Please refer to LICENSE.md for the specific license agreement that pertains to this Benchmark Software.
 */
 
@@ -17,15 +17,15 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
  *
  *  EEMBC : Consumer Subcommittee
  *
- * AUTHOR : 
- *          Modified for Multi Instance Test Harness by Ron Olson, 
+ * AUTHOR :
+ *          Modified for Multi Instance Test Harness by Ron Olson,
  *          IBM Corporation
  *
  *    CVS : $Revision: 1.1 $
  *          $Date: 2004/05/10 22:36:03 $
  *          $Author: rick $
  *          $Source: D:/cvs/eembc2/consumer/cjpegv2/jchuff.c,v $
- *          
+ *
  * NOTE   :
  *
  *------------------------------------------------------------------------------
@@ -44,8 +44,8 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
  *
  *
  *------------------------------------------------------------------------------
- * Other Copyright Notice (if any): 
- * 
+ * Other Copyright Notice (if any):
+ *
  * For conditions of distribution and use, see the accompanying README file.
  * ===========================================================================*/
 /*
@@ -224,7 +224,7 @@ jpeg_make_c_derived_tbl (j_compress_ptr cinfo, boolean isDC, int tblno,
       (*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_IMAGE,
                   SIZEOF(c_derived_tbl));
   dtbl = *pdtbl;
-  
+
   /* Figure C.1: make table of Huffman code length for each symbol */
 
   p = 0;
@@ -237,7 +237,7 @@ jpeg_make_c_derived_tbl (j_compress_ptr cinfo, boolean isDC, int tblno,
   }
   huffsize[p] = 0;
   lastp = p;
-  
+
   /* Figure C.2: generate the codes themselves */
   /* We also validate that the counts represent a legal Huffman code tree. */
 
@@ -257,7 +257,7 @@ jpeg_make_c_derived_tbl (j_compress_ptr cinfo, boolean isDC, int tblno,
     code <<= 1;
     si++;
   }
-  
+
   /* Figure C.3: generate encoding tables */
   /* These are code and size indexed by symbol value */
 
@@ -331,16 +331,16 @@ emit_bits (working_state * state, unsigned int code, int size)
     ERREXIT(state->cinfo, JERR_HUFF_MISSING_CODE);
 
   put_buffer &= (((e_s32) 1)<<size) - 1; /* mask off any extra bits in code */
-  
+
   put_bits += size;        /* new number of bits in buffer */
-  
+
   put_buffer <<= 24 - put_bits; /* align incoming bits */
 
   put_buffer |= state->cur.put_buffer; /* and merge with old buffer contents */
-  
+
   while (put_bits >= 8) {
     int c = (int) ((put_buffer >> 16) & 0xFF);
-    
+
     emit_byte(state, c, return FALSE);
     if (c == 0xFF) {        /* need to stuff a zero byte? */
       emit_byte(state, 0, return FALSE);
@@ -376,9 +376,9 @@ encode_one_block (working_state * state, JCOEFPTR block, int last_dc_val,
   register int temp, temp2;
   register int nbits;
   register int k, r, i;
-  
+
   /* Encode the DC coefficient difference per section F.1.2.1 */
-  
+
   temp = temp2 = block[0] - last_dc_val;
 
   if (temp < 0) {
@@ -387,7 +387,7 @@ encode_one_block (working_state * state, JCOEFPTR block, int last_dc_val,
     /* This code assumes we are on a two's complement machine */
     temp2--;
   }
-  
+
   /* Find the number of bits needed for the magnitude of the coefficient */
   nbits = 0;
   while (temp) {
@@ -399,7 +399,7 @@ encode_one_block (working_state * state, JCOEFPTR block, int last_dc_val,
    */
   if (nbits > MAX_COEF_BITS+1)
     ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
-  
+
   /* Emit the Huffman-coded symbol for the number of bits */
   if (! emit_bits(state, dctbl->ehufco[nbits], dctbl->ehufsi[nbits]))
     return FALSE;
@@ -411,51 +411,75 @@ encode_one_block (working_state * state, JCOEFPTR block, int last_dc_val,
       return FALSE;
 
   /* Encode the AC coefficients per section F.1.2.2 */
-  
+
   r = 0;            /* r = run length of zeros */
-  
+
+  short temps[DCTSIZE2];
+  unsigned char iotas[DCTSIZE2];
+  temps[0] = 1;
+  iotas[0] = 0;
+#if USE_RVV
+  short count = 0;
+  for (k = 1; k < DCTSIZE2;) {
+    size_t vl = __riscv_vsetvl_e16m8(DCTSIZE2);
+    vuint8m4_t idx = __riscv_vsll_vx_u8m4(__riscv_vle8_v_u8m4((const unsigned char*)cjpeg_natural_order + k, vl), 1, vl);
+    vint16m8_t coeffs = __riscv_vloxei8_v_i16m8((const short*)block, idx, vl);
+    vbool2_t zeros = __riscv_vmseq_vx_i16m8_b2(coeffs, 0, vl);
+    vuint8m4_t iota = __riscv_viota_m_u8m4(zeros, vl);
+    iota = __riscv_vadd_vx_u8m4(iota, count, vl);
+    count += (vl - __riscv_vcpop_m_b2(zeros, vl));
+    __riscv_vse16_v_i16m8(temps + k, coeffs, vl);
+    __riscv_vse8_v_u8m4(iotas + k, iota, vl);
+    k += vl;
+  }
+#else
   for (k = 1; k < DCTSIZE2; k++) {
-    if ((temp = block[cjpeg_natural_order[k]]) == 0) {
-      r++;
-    } else {
+    temps[k] = block[cjpeg_natural_order[k]];
+    iotas[k] = iotas[k-1] + (temps[k-1] ? 0 : 1);
+  }
+#endif
+  unsigned char prev = 0;
+  for (k = 1; k < DCTSIZE2; k++) {
+    temp = temps[k];
+    if (temp != 0) {
+      r = iotas[k] - prev;
+      prev = iotas[k];
       /* if run length > 15, must emit special run-length-16 codes (0xF0) */
       while (r > 15) {
-    if (! emit_bits(state, actbl->ehufco[0xF0], actbl->ehufsi[0xF0]))
-      return FALSE;
-    r -= 16;
+	if (! emit_bits(state, actbl->ehufco[0xF0], actbl->ehufsi[0xF0]))
+	  return FALSE;
+	r -= 16;
       }
 
       temp2 = temp;
       if (temp < 0) {
-    temp = -temp;        /* temp is abs value of input */
-    /* This code assumes we are on a two's complement machine */
-    temp2--;
+	temp = -temp;        /* temp is abs value of input */
+	/* This code assumes we are on a two's complement machine */
+	temp2--;
       }
-      
+
       /* Find the number of bits needed for the magnitude of the coefficient */
       nbits = 1;        /* there must be at least one 1 bit */
       while ((temp >>= 1))
-    nbits++;
+	nbits++;
       /* Check for out-of-range coefficient values */
       if (nbits > MAX_COEF_BITS)
-    ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
-      
+	ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
+
       /* Emit Huffman symbol for run length / number of bits */
       i = (r << 4) + nbits;
       if (! emit_bits(state, actbl->ehufco[i], actbl->ehufsi[i]))
-    return FALSE;
+	return FALSE;
 
       /* Emit that number of bits of the value, if positive, */
       /* or the complement of its magnitude, if negative. */
       if (! emit_bits(state, (unsigned int) temp2, nbits))
-    return FALSE;
-      
-      r = 0;
+	return FALSE;
     }
   }
 
   /* If the last coef(s) were zero, emit an end-of-block code */
-  if (r > 0)
+  if (temps[DCTSIZE2-1] == 0)
     if (! emit_bits(state, actbl->ehufco[0], actbl->ehufsi[0]))
       return FALSE;
 

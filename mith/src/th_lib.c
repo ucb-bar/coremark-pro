@@ -1204,7 +1204,11 @@ char *th_strcat(char *dest, const char *src) {
 	implementation for this function.
 */
 void *th_memcpy(void *s1, const void *s2, size_t n) {
+#if USE_RVV
+        return vec_memcpy(s1, s2, n);
+#else
 	return memcpy(s1,s2,n);
+#endif
 }
 /* Function: th_memmove
 	Description:
@@ -1225,7 +1229,11 @@ void *th_memset(void *s, int c, size_t n) {
 	while(n>0)	*d++ = c;
 	return dest;
 #else
+#if USE_RVV
+        return vec_memset(s,c,n);
+#else
 	return memset(s,c,n);
+#endif
 #endif
 }
  

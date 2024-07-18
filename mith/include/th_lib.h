@@ -53,6 +53,10 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
 #include "th_version.h"
 #include "th_al.h"
 
+#ifdef USE_RVV
+#include "rvv.h"
+#endif
+
 #define		VN_BAD_PTR          0x0001
 #define		VN_BAD_MAJOR        0x0002
 #define		VN_BAD_MINOR        0x0004

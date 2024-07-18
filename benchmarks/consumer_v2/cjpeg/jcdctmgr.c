@@ -173,25 +173,44 @@ forward_DCT (j_compress_ptr cinfo, jpeg_component_info * compptr,
       register int elemr;
 
       workspaceptr = workspace;
+
+#if USE_RVV
+#if DCTSIZE == 8
       for (elemr = 0; elemr < DCTSIZE; elemr++) {
-    elemptr = sample_data[elemr] + start_col;
-#if DCTSIZE == 8        /* unroll the inner loop */
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
-#else
-    { register int elemc;
-      for (elemc = DCTSIZE; elemc > 0; elemc--) {
-        *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	elemptr = sample_data[elemr] + start_col;
+	size_t vl = __riscv_vsetvl_e32m8(DCTSIZE);
+	vuint8m2_t s8 = __riscv_vle8_v_u8m2(elemptr, vl);
+	vl = __riscv_vsetvl_e32m8(8); // should not be necessary
+	vint32m8_t s32 = __riscv_vreinterpret_v_u32m8_i32m8(__riscv_vzext_vf4_u32m8(s8, vl));
+	vint32m8_t r = __riscv_vsub_vx_i32m8(s32, CENTERJSAMPLE, vl);
+	__riscv_vse32_v_i32m8(workspaceptr, r, vl);
+	workspaceptr += DCTSIZE;
       }
-    }
+#else
+#error "Unsupported DCTSIZE"
+#endif
+#else
+      for (elemr = 0; elemr < DCTSIZE; elemr++) {
+	elemptr = sample_data[elemr] + start_col;
+#if DCTSIZE == 8        /* unroll the inner loop */
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	*workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+#else
+	{
+	  register int elemc;
+	  for (elemc = DCTSIZE; elemc > 0; elemc--) {
+	    *workspaceptr++ = GETJSAMPLE(*elemptr++) - CENTERJSAMPLE;
+	  }
+	}
 #endif
       }
+#endif
     }
 
     /* Perform the DCT */
@@ -202,37 +221,53 @@ forward_DCT (j_compress_ptr cinfo, jpeg_component_info * compptr,
       register int i;
       register JCOEFPTR output_ptr = coef_blocks[bi];
 
+#if USE_RVV
+      for (i = 0; i < DCTSIZE2; ) {
+	size_t vl = __riscv_vsetvl_e32m8(DCTSIZE2 - i);
+	vint32m8_t qvals = __riscv_vle32_v_i32m8(&divisors[i], vl);
+	vint32m8_t temps = __riscv_vle32_v_i32m8(&workspace[i], vl);
+	vbool4_t negs = __riscv_vmslt_vx_i32m8_b4(temps, 0, vl);
+	temps = __riscv_vneg_v_i32m8_m(negs, temps, vl);
+	vint32m8_t shr = __riscv_vsra_vx_i32m8(qvals, 1, vl);
+	temps = __riscv_vadd_vv_i32m8(temps, shr, vl);
+        temps = __riscv_vdiv_vv_i32m8(temps, qvals, vl);
+	temps = __riscv_vneg_v_i32m8_m(negs, temps, vl);
+	vint16m4_t n = __riscv_vncvt_x_x_w_i16m4(temps, vl);
+	__riscv_vse16_v_i16m4(&output_ptr[i], n, vl);
+	i += vl;
+      }
+#else
       for (i = 0; i < DCTSIZE2; i++) {
-    qval = divisors[i];
-    temp = workspace[i];
-    /* Divide the coefficient value by qval, ensuring proper rounding.
-     * Since C does not specify the direction of rounding for negative
-     * quotients, we have to force the dividend positive for portability.
-     *
-     * In most files, at least half of the output values will be zero
-     * (at default quantization settings, more like three-quarters...)
-     * so we should ensure that this case is fast.  On many machines,
-     * a comparison is enough cheaper than a divide to make a special test
-     * a win.  Since both inputs will be nonnegative, we need only test
-     * for a < b to discover whether a/b is 0.
-     * If your machine's division is fast enough, define FAST_DIVIDE.
-     */
+	qval = divisors[i];
+	temp = workspace[i];
+	/* Divide the coefficient value by qval, ensuring proper rounding.
+	 * Since C does not specify the direction of rounding for negative
+	 * quotients, we have to force the dividend positive for portability.
+	 *
+	 * In most files, at least half of the output values will be zero
+	 * (at default quantization settings, more like three-quarters...)
+	 * so we should ensure that this case is fast.  On many machines,
+	 * a comparison is enough cheaper than a divide to make a special test
+	 * a win.  Since both inputs will be nonnegative, we need only test
+	 * for a < b to discover whether a/b is 0.
+	 * If your machine's division is fast enough, define FAST_DIVIDE.
+	 */
 #ifdef FAST_DIVIDE
 #define DIVIDE_BY(a,b)    a /= b
 #else
 #define DIVIDE_BY(a,b)    if (a >= b) a /= b; else a = 0
 #endif
-    if (temp < 0) {
-      temp = -temp;
-      temp += qval>>1;    /* for rounding */
-      DIVIDE_BY(temp, qval);
-      temp = -temp;
-    } else {
-      temp += qval>>1;    /* for rounding */
-      DIVIDE_BY(temp, qval);
-    }
-    output_ptr[i] = (JCOEF) temp;
+	if (temp < 0) {
+	  temp = -temp;
+	  temp += qval>>1;    /* for rounding */
+	  DIVIDE_BY(temp, qval);
+	  temp = -temp;
+	} else {
+	  temp += qval>>1;    /* for rounding */
+	  DIVIDE_BY(temp, qval);
+	}
       }
+#endif
     }
   }
 }

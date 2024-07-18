@@ -105,9 +105,13 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
 #else /* not BSD, assume ANSI/SysV string lib */
 
 #include <string.h>
+#ifdef USE_RVV
+#define MEMZERO(target,size)    vec_memset((void *)(target), 0, (size_t)(size))
+#define MEMCOPY(dest,src,size)    vec_memcpy((void *)(dest), (const void *)(src), (size_t)(size))
+#else
 #define MEMZERO(target,size)    memset((void *)(target), 0, (size_t)(size))
 #define MEMCOPY(dest,src,size)    memcpy((void *)(dest), (const void *)(src), (size_t)(size))
-
+#endif
 #endif
 
 /*
