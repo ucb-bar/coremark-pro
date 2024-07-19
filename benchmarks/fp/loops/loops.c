@@ -144,6 +144,10 @@ char *test_type_str[] = {
 };
 #endif
 
+uint32_t hex(float f) {
+  return *((uint32_t*)(&f));
+}
+
 e_fp *reinit_vec_limited(loops_params *params, e_fp *p, int nvals) {
 	int i=0;
 	int si=random_u32(params->r);
@@ -245,13 +249,30 @@ static e_fp get_array_feedback(e_fp *a, int maxidx) {
 	int i;
 	e_fp ret=0.0;
 	if (maxidx==0) return 0.0;
+#if USE_RVV
+        size_t vl;
+        float vret;
+        __asm__ volatile("vsetvli %0, zero, e32, m8, ta, ma" : "=r"(vl));
+        __asm__ volatile("vmv.v.x  v0, %0" : : "r"(0x5555555555555555));
+        __asm__ volatile("vmv.s.x v16, %0" : : "r"(0));
+        for (i=0; i<maxidx; ) {
+          __asm__ volatile("vsetvli  %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(maxidx-i));
+          __asm__ volatile("vle32.v  v8, 0(%0)" : : "r"(&a[i]));
+          __asm__ volatile("vfneg.v  v8, v8, v0.t");
+          __asm__ volatile("vfredosum.vs v16, v8, v16");
+          i += vl;
+        }
+        __asm__ volatile("vfmv.f.s %0, v16" : "=f"(vret));
+        ret = vret;
+
+#else
 	for (i=0; i<maxidx; i++) {
                 ret+=(i&1)?a[i]:-a[i];
 		//PT: 4/4/2016: w/g decision
 		//if (i&1) ret+=a[i];
 		//else ret-=a[i];
 	}
-
+#endif
 
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nfeed %d:",debug_counter++);
@@ -922,10 +943,6 @@ e_fp state_fragment(loops_params *p) {
     }
 
 	return ret;
-}
-
-uint32_t hex(float f) {
-  return *((uint32_t*)(&f));
 }
 
 e_fp adi_integration(loops_params *p) {
