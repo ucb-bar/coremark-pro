@@ -415,71 +415,81 @@ encode_one_block (working_state * state, JCOEFPTR block, int last_dc_val,
   r = 0;            /* r = run length of zeros */
 
   short temps[DCTSIZE2];
-  unsigned char iotas[DCTSIZE2];
-  temps[0] = 1;
-  iotas[0] = 0;
+  unsigned short iotas[DCTSIZE2];
+  unsigned short zero_count = 0;
+  unsigned short nonzero_count = 0;
 #if USE_RVV
-  short count = 0;
   for (k = 1; k < DCTSIZE2;) {
     size_t vl = __riscv_vsetvl_e16m8(DCTSIZE2);
     vuint8m4_t idx = __riscv_vsll_vx_u8m4(__riscv_vle8_v_u8m4((const unsigned char*)cjpeg_natural_order + k, vl), 1, vl);
     vint16m8_t coeffs = __riscv_vloxei8_v_i16m8((const short*)block, idx, vl);
     vbool2_t zeros = __riscv_vmseq_vx_i16m8_b2(coeffs, 0, vl);
-    vuint8m4_t iota = __riscv_viota_m_u8m4(zeros, vl);
-    iota = __riscv_vadd_vx_u8m4(iota, count, vl);
-    count += (vl - __riscv_vcpop_m_b2(zeros, vl));
-    __riscv_vse16_v_i16m8(temps + k, coeffs, vl);
-    __riscv_vse8_v_u8m4(iotas + k, iota, vl);
+    vbool2_t nonzeros = __riscv_vmnand_mm_b2(zeros, zeros, vl);
+    vuint16m8_t z_iota = __riscv_vadd_vx_u16m8(__riscv_viota_m_u16m8(zeros, vl), zero_count, vl);
+    vuint16m8_t nz_iota = __riscv_vadd_vx_u16m8(__riscv_viota_m_u16m8(nonzeros, vl), nonzero_count, vl);
+    vuint16m8_t nz_iota_offsets = __riscv_vsll_vx_u16m8(nz_iota, 1, vl);
+
+    size_t t = __riscv_vcpop_m_b2(zeros, vl);
+    zero_count += t;
+    nonzero_count += (vl - t);
+
+    __riscv_vsuxei16_v_i16m8_m(nonzeros, temps, nz_iota_offsets, coeffs, vl);
+    __riscv_vsuxei16_v_u16m8_m(nonzeros, iotas, nz_iota_offsets, z_iota, vl);
     k += vl;
   }
 #else
   for (k = 1; k < DCTSIZE2; k++) {
-    temps[k] = block[cjpeg_natural_order[k]];
-    iotas[k] = iotas[k-1] + (temps[k-1] ? 0 : 1);
+    temp = block[cjpeg_natural_order[k]];
+    if (temp) {
+      temps[nonzero_count] = temp;
+      iotas[nonzero_count] = zeros_count;
+      nonzero_count += 1;
+    } else {
+      zeros_count++;
+    }
   }
 #endif
   unsigned char prev = 0;
-  for (k = 1; k < DCTSIZE2; k++) {
-    temp = temps[k];
-    if (temp != 0) {
-      r = iotas[k] - prev;
-      prev = iotas[k];
-      /* if run length > 15, must emit special run-length-16 codes (0xF0) */
-      while (r > 15) {
-	if (! emit_bits(state, actbl->ehufco[0xF0], actbl->ehufsi[0xF0]))
-	  return FALSE;
-	r -= 16;
-      }
+  for (unsigned char idx = 0; idx < nonzero_count; idx++) {
+    temp = temps[idx];
+    r = iotas[idx] - prev;
+    prev = iotas[idx];
 
-      temp2 = temp;
-      if (temp < 0) {
-	temp = -temp;        /* temp is abs value of input */
-	/* This code assumes we are on a two's complement machine */
-	temp2--;
-      }
-
-      /* Find the number of bits needed for the magnitude of the coefficient */
-      nbits = 1;        /* there must be at least one 1 bit */
-      while ((temp >>= 1))
-	nbits++;
-      /* Check for out-of-range coefficient values */
-      if (nbits > MAX_COEF_BITS)
-	ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
-
-      /* Emit Huffman symbol for run length / number of bits */
-      i = (r << 4) + nbits;
-      if (! emit_bits(state, actbl->ehufco[i], actbl->ehufsi[i]))
+    /* if run length > 15, must emit special run-length-16 codes (0xF0) */
+    while (r > 15) {
+      if (! emit_bits(state, actbl->ehufco[0xF0], actbl->ehufsi[0xF0]))
 	return FALSE;
-
-      /* Emit that number of bits of the value, if positive, */
-      /* or the complement of its magnitude, if negative. */
-      if (! emit_bits(state, (unsigned int) temp2, nbits))
-	return FALSE;
+      r -= 16;
     }
+
+    temp2 = temp;
+    if (temp < 0) {
+      temp = -temp;        /* temp is abs value of input */
+      /* This code assumes we are on a two's complement machine */
+      temp2--;
+    }
+
+    /* Find the number of bits needed for the magnitude of the coefficient */
+    nbits = 1;        /* there must be at least one 1 bit */
+    while ((temp >>= 1))
+      nbits++;
+    /* Check for out-of-range coefficient values */
+    if (nbits > MAX_COEF_BITS)
+      ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
+
+    /* Emit Huffman symbol for run length / number of bits */
+    i = (r << 4) + nbits;
+    if (! emit_bits(state, actbl->ehufco[i], actbl->ehufsi[i]))
+      return FALSE;
+
+    /* Emit that number of bits of the value, if positive, */
+    /* or the complement of its magnitude, if negative. */
+    if (! emit_bits(state, (unsigned int) temp2, nbits))
+      return FALSE;
   }
 
   /* If the last coef(s) were zero, emit an end-of-block code */
-  if (temps[DCTSIZE2-1] == 0)
+  if (block[cjpeg_natural_order[DCTSIZE2-1]] == 0)
     if (! emit_bits(state, actbl->ehufco[0], actbl->ehufsi[0]))
       return FALSE;
 
