@@ -1,12 +1,12 @@
 /*
-(C) 2014 EEMBC(R).  All rights reserved.                            
+(C) 2014 EEMBC(R).  All rights reserved.
 
-All EEMBC Benchmark Software are products of EEMBC 
-and are provided under the terms of the EEMBC Benchmark License Agreements.  
-The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members 
-and is protected under all applicable laws, including all applicable copyright laws.  
-If you received this EEMBC Benchmark Software without having 
-a currently effective EEMBC Benchmark License Agreement, you must discontinue use. 
+All EEMBC Benchmark Software are products of EEMBC
+and are provided under the terms of the EEMBC Benchmark License Agreements.
+The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members
+and is protected under all applicable laws, including all applicable copyright laws.
+If you received this EEMBC Benchmark Software without having
+a currently effective EEMBC Benchmark License Agreement, you must discontinue use.
 Please refer to LICENSE.md for the specific license agreement that pertains to this Benchmark Software.
 */
 
@@ -17,15 +17,15 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
  *
  *  EEMBC : Consumer Subcommittee
  *
- * AUTHOR : 
- *          Modified for Multi Instance Test Harness by Ron Olson, 
+ * AUTHOR :
+ *          Modified for Multi Instance Test Harness by Ron Olson,
  *          IBM Corporation
  *
  *    CVS : $Revision: 1.1 $
  *          $Date: 2004/05/10 22:36:03 $
  *          $Author: rick $
  *          $Source: D:/cvs/eembc2/consumer/cjpegv2/jccolor.c,v $
- *          
+ *
  * NOTE   :
  *
  *------------------------------------------------------------------------------
@@ -44,8 +44,8 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
  *
  *
  *------------------------------------------------------------------------------
- * Other Copyright Notice (if any): 
- * 
+ * Other Copyright Notice (if any):
+ *
  * For conditions of distribution and use, see the accompanying README file.
  * ===========================================================================*/
 /*
@@ -198,6 +198,48 @@ rgb_ycc_convert (j_compress_ptr cinfo,
     outptr1 = output_buf[1][output_row];
     outptr2 = output_buf[2][output_row];
     output_row++;
+#if USE_RVV
+    for (col = 0; col < num_cols; ) {
+      size_t vl;
+      __asm__ volatile("vsetvli %0, %1, e8, m1, ta, ma" : "=r"(vl) : "r"(num_cols - col));
+      __asm__ volatile("vlseg3e8.v v0, (%0)" : : "r"(&inptr[col * RGB_PIXELSIZE]));
+      __asm__ volatile("vsetvli zero, %0, e32, m4, ta, ma" : : "r"(vl));
+      __asm__ volatile("vzext.vf4   v4, v0");
+      __asm__ volatile("vzext.vf4   v8, v1");
+      __asm__ volatile("vzext.vf4  v12, v2");
+
+#define FIELD(r_off, g_off, b_off, out)					\
+      __asm__ volatile("vsetvli zero, %0, e32, m4, ta, ma" : : "r"(vl));\
+      __asm__ volatile("vadd.vx    v16,  v4, %0" : : "r"(r_off));	\
+      __asm__ volatile("vadd.vx    v20,  v8, %0" : : "r"(g_off));	\
+      __asm__ volatile("vadd.vx    v24, v12, %0" : : "r"(b_off));	\
+									\
+									\
+      __asm__ volatile("vsll.vi    v16, v16, 2");			\
+      __asm__ volatile("vsll.vi    v20, v20, 2");			\
+      __asm__ volatile("vsll.vi    v24, v24, 2");			\
+									\
+      __asm__ volatile("vluxei32.v v16, (%0), v16" : : "r"(ctab));	\
+      __asm__ volatile("vluxei32.v v20, (%0), v20" : : "r"(ctab));	\
+      __asm__ volatile("vluxei32.v v24, (%0), v24" : : "r"(ctab));	\
+									\
+      __asm__ volatile("vadd.vv    v16, v16, v20");			\
+      __asm__ volatile("vadd.vv    v16, v16, v24");			\
+      __asm__ volatile("vsetvli zero, %0, e16, m2, ta, ma" : : "r"(vl)); \
+      __asm__ volatile("vnsra.wi   v20, v16, 16");			\
+      __asm__ volatile("vsetvli zero, %0, e8, m1, ta, ma" : : "r"(vl));	\
+      __asm__ volatile("vnsra.wi   v24, v20, 0");			\
+									\
+      __asm__ volatile("vse8.v     v24, (%0)" : : "r"(&out[col]));	\
+
+
+      FIELD(R_Y_OFF , G_Y_OFF , B_Y_OFF , outptr0);
+      FIELD(R_CB_OFF, G_CB_OFF, B_CB_OFF, outptr1);
+      FIELD(R_CR_OFF, G_CR_OFF, B_CR_OFF, outptr2);
+
+      col += vl;
+    }
+#else
     for (col = 0; col < num_cols; col++) {
       r = GETJSAMPLE(inptr[RGB_RED]);
       g = GETJSAMPLE(inptr[RGB_GREEN]);
@@ -221,6 +263,7 @@ rgb_ycc_convert (j_compress_ptr cinfo,
         ((ctab[r+R_CR_OFF] + ctab[g+G_CR_OFF] + ctab[b+B_CR_OFF])
          >> SCALEBITS);
     }
+#endif
   }
 }
 
