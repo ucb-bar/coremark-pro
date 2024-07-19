@@ -190,13 +190,27 @@ get_8bit_row (j_compress_ptr cinfo, cjpeg_source_ptr sinfo)
   /* Expand the colormap indexes to real data */
   inptr = image_ptr[0];
   outptr = source->pub.buffer[0];
+
+#if USE_RVV
+  size_t n = cinfo->image_width;
+  for (size_t c = 0; c < n;) {
+    size_t vl;
+    __asm__ volatile("vsetvli %0, %1, e8, m2, ta, ma" : "=r"(vl) : "r"(n - c));
+    __asm__ volatile("vle8.v v0, (%0)" : : "r"(&inptr[c]));
+    __asm__ volatile("vluxei8.v  v8, (%0), v0" : : "r"(colormap[0]));
+    __asm__ volatile("vluxei8.v v10, (%0), v0" : : "r"(colormap[1]));
+    __asm__ volatile("vluxei8.v v12, (%0), v0" : : "r"(colormap[2]));
+    __asm__ volatile("vsseg3e8.v v8, (%0)" : : "r"(&outptr[c*3]));
+    c += vl;
+  }
+#else
   for (col = cinfo->image_width; col > 0; col--) {
     t = GETJSAMPLE(*inptr++);
     *outptr++ = colormap[0][t];    /* can omit GETJSAMPLE() safely */
     *outptr++ = colormap[1][t];
     *outptr++ = colormap[2][t];
   }
-
+#endif
   return 1;
 }
 
