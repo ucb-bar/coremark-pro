@@ -1,12 +1,12 @@
 /*
-(C) 2014 EEMBC(R).  All rights reserved.                            
+(C) 2014 EEMBC(R).  All rights reserved.
 
-All EEMBC Benchmark Software are products of EEMBC 
-and are provided under the terms of the EEMBC Benchmark License Agreements.  
-The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members 
-and is protected under all applicable laws, including all applicable copyright laws.  
-If you received this EEMBC Benchmark Software without having 
-a currently effective EEMBC Benchmark License Agreement, you must discontinue use. 
+All EEMBC Benchmark Software are products of EEMBC
+and are provided under the terms of the EEMBC Benchmark License Agreements.
+The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members
+and is protected under all applicable laws, including all applicable copyright laws.
+If you received this EEMBC Benchmark Software without having
+a currently effective EEMBC Benchmark License Agreement, you must discontinue use.
 Please refer to LICENSE.md for the specific license agreement that pertains to this Benchmark Software.
 */
 
@@ -33,7 +33,7 @@ linpack_params presets_linpack[NUM_DATAS];
 /* ======================================================================== */
 /* file provides :
 define - init base input params (segment [within 0..2 boundary], number of coefficients to calculate, number of integration steps)
-init -  allocate working memory, assign a[0] and b[0] . 
+init -  allocate working memory, assign a[0] and b[0] .
 run - calculate N coefficients in the segment
 fini - calculate avg of coeffients then dealloc working memory
 verify - SNR average of coefficients vs golden reference, must run at least base iterations for valid output.
@@ -64,7 +64,7 @@ void *define_params_linpack(unsigned int idx, char *name, char *dataset) {
     linpack_params *params;
 	e_u32 data_index=idx;
 	init_presets_linpack();
-	
+
 
 	/* parameter setup */
 	params=(linpack_params *)th_calloc(1,sizeof(linpack_params));
@@ -77,16 +77,16 @@ void *define_params_linpack(unsigned int idx, char *name, char *dataset) {
 	params->n=100;  /* original linpack value */
 	params->ntimes=10; /* original linpack value */
 	params->random_mask=0xff; /* 256 random values */
-	
+
 	if (pgo_training_run) {
-		data_index=5; 
+		data_index=5;
 	} else {
 		th_parse_buf_flag_unsigned(dataset,"-i",&data_index);
 	}
 	/* preset datasets */
 	if (data_index<NUM_DATAS) {
 		th_memcpy(params,&(presets_linpack[data_index]),sizeof(linpack_params));
-	} 
+	}
 	/* command line overrides */
 	if (pgo_training_run==0) {
 		th_parse_buf_flag_unsigned(dataset,"-s",&params->seed);
@@ -108,7 +108,7 @@ void *define_params_linpack(unsigned int idx, char *name, char *dataset) {
 #endif
 
 	linpack_first(params);
-	
+
 	return params;
 }
 int bmark_clean_linpack(void *in_params) {
@@ -165,19 +165,19 @@ int snr_set(linpack_params *params, e_u32 accbits)
 		params->max_snr=accbits;
 	if (accbits>params->minbits)
 		return 0;
-	else 
+	else
 		return 1;
 }
 
 void *t_run_test_linpack(struct TCDef *tcdef,void *in_params) {
 	linpack_params *params=(linpack_params *)in_params;
 	e_u32 test1=0,test2=0;
-	
+
 	tcdef->CRC=0;
 	params->r=rand_init(params->seed,256,-1e10,1e10);
 	run_linpack(params);
 	rand_fini(params->r);
-	
+
 	/* If ref data available, do a quick check */
 	if (!params->gen_ref) {
 		if (params->ref_data) {
@@ -189,7 +189,7 @@ void *t_run_test_linpack(struct TCDef *tcdef,void *in_params) {
 				tcdef->CRC++;
 		}
 	}
-	
+
 	/* Setup values */
 	tcdef->v1=test1;
 	tcdef->v2=test2;
@@ -198,7 +198,7 @@ void *t_run_test_linpack(struct TCDef *tcdef,void *in_params) {
 	/* Result values */
 	tcdef->dbl_data[0]=params->ret_lda;
 	tcdef->dbl_data[1]=params->ret_ldaa;
-	
+
 	return tcdef;
 }
 
@@ -210,7 +210,7 @@ int bmark_verify_linpack(void *in_params) {
 	if (params->gen_ref) {
 		char sbuf[256];
 		th_printf("/**** START DATASET ****/\n#include \"th_lib.h\"\n#include \"../linpack.h\"\n");
-		th_printf("static linpack_params in_data_index={\n\t"); 
+		th_printf("static linpack_params in_data_index={\n\t");
 		th_printf("%d,%d,%d,%u,0,\n\tNULL,NULL,NULL,NULL,\n\tNULL,\n\t",
 		params->lda,params->n,params->ntimes,params->seed);
 		th_printf("%s,\n\t",th_sprint_fp(params->ret_lda,sbuf));
@@ -220,7 +220,7 @@ int bmark_verify_linpack(void *in_params) {
 		th_printf("%s,\n\t",th_sprint_fp(FPCONST(1.0),sbuf));
 		th_printf("%s,\n\t",th_sprint_fp(FPCONST(1.0),sbuf));
 		th_printf("%s,\n\t0,0,\n\t0x%08x,NULL,MIN_ACC_BITS_FP,\n\t0.0,0.0,0.0,0.0,0.0,0.0,0.0",th_sprint_fp(params->residn,sbuf),params->random_mask);
-		th_printf("}; //ref input data\n\n"); 
+		th_printf("}; //ref input data\n\n");
 		th_printf("void init_preset(int idx) {\n");
 		th_printf("th_memcpy(presets_linpack[idx],in_data_index,sizeof(linpack_params));\n");
 		th_printf("presets_linpack[idx].ref_data=in_data_index;\n}");
@@ -264,7 +264,7 @@ static void linpack_first(linpack_params *params) {
 	int info,i;
 /* initial run once to derive platform verification values - helps debug, does not affect timing */
 	matgen(a,lda,n,b,&norma,1325,params);
-#if BMDEBUG 
+#if BMDEBUG
 	th_printf("Input gen\n");
 	for (info = 0; info < n; info++) {
 		for (i = 0; i < n; i++) {
@@ -276,7 +276,7 @@ static void linpack_first(linpack_params *params) {
 #endif
 	dgefa(a,lda,n,ipvt,&info);
 	dgesl(a,lda,n,ipvt,b,0);
-/* compute a residual to verify results.  */ 
+/* compute a residual to verify results.  */
 	for (i = 0; i < n; i++) {
 		x[i] = b[i];
 	}
@@ -288,11 +288,11 @@ static void linpack_first(linpack_params *params) {
 	params->resid = 0.0;
 	normx = 0.0;
 	for (i = 0; i < n; i++) {
-			params->resid = (params->resid > th_fabs((e_fp)b[i])) 
+			params->resid = (params->resid > th_fabs((e_fp)b[i]))
 		? params->resid : th_fabs((e_fp)b[i]);
-			normx = (normx > th_fabs((e_fp)x[i])) 
+			normx = (normx > th_fabs((e_fp)x[i]))
 		? normx : th_fabs((e_fp)x[i]);
-#if BMDEBUG 
+#if BMDEBUG
 		th_printf("%d: %1.18le %1.18le %1.18le %1.18le\n",i, params->resid, b[i], normx, x[i]);
 #endif
 	}
@@ -312,7 +312,7 @@ static e_fp get_avg(e_fp *a, int maxidx) {
 	e_fp ret=0.0;
 	for (i=0; i<maxidx; i++) {
 		ret+=a[i];
-#if BMDEBUG 
+#if BMDEBUG
 		th_printf("%d: %1.18le\n",dbgi++,a[i]);
 #endif
 	}
@@ -327,10 +327,10 @@ static e_fp run_single_linpack(int outer, int inner, int lda, linpack_params *pa
 	int j=0; /* feedback array index */
 
 	for (i = 0; i < outer; i++) {
-		/*  matgen generates a new input each time through. 
+		/*  matgen generates a new input each time through.
 			make the input different each time so code does not get optimized away... */
 		matgen(a,lda,n,b,&norma,random_u32(params->r),params);
-		dgefa(a,lda,n,ipvt,&info); 
+		dgefa(a,lda,n,ipvt,&info);
 		dgesl(a,lda,n,ipvt,b,0);
 		/* Now account for the final values calculated */
 		feedback[j++]=get_avg(b,n);
@@ -338,9 +338,9 @@ static e_fp run_single_linpack(int outer, int inner, int lda, linpack_params *pa
 	for (i = 0; i < inner; i++) {
 		matgen(a,lda,n,b,&norma,random_u32(params->r),params);
 		dgefa(a,lda,n,ipvt,&info);
-		/* Since only the last pivots will be used, make sure to collect something from all pivots, 
+		/* Since only the last pivots will be used, make sure to collect something from all pivots,
 			otherwise a smart compiler can eliminate all but the last iteration */
-		feedback[j++]=(e_fp)(th_crcbuffer(ipvt,sizeof(e_u16)*n,0)/32768)+norma; 
+		feedback[j++]=(e_fp)(th_crcbuffer(ipvt,sizeof(e_u16)*n,0)/32768)+norma;
 	}
 	for (i = 0; i < inner; i++) {
 		dgesl(a,lda,n,ipvt,b,0);
@@ -379,7 +379,7 @@ static void matgen(e_fp *a,int lda,int n,e_fp *b,e_fp *norma,e_u32 init, linpack
 	}
 }
 
-/*----------------------*/ 
+/*----------------------*/
 static void dgefa(e_fp *a,int lda,int n,e_u16 ipvt[],int *info)
 /* In this function, references to a[i][j] are written a[lda*i+j].  */
 /*
@@ -447,7 +447,7 @@ int idamax(),j,k,kp1,l,nm1;
 			l = idamax(n-k,&a[lda*k+k],1) + k;
 			ipvt[k] = l;
 
-			/* zero pivot implies this column already 
+			/* zero pivot implies this column already
 			   triangularized */
 
 			if (a[lda*k+l] != ZERO) {
@@ -457,7 +457,7 @@ int idamax(),j,k,kp1,l,nm1;
 				if (l != k) {
 					t = a[lda*k+l];
 					a[lda*k+l] = a[lda*k+k];
-					a[lda*k+k] = t; 
+					a[lda*k+k] = t;
 				}
 
 				/* compute multipliers */
@@ -475,18 +475,18 @@ int idamax(),j,k,kp1,l,nm1;
 					}
 					daxpy(n-(k+1),t,&a[lda*k+k+1],1,
 					      &a[lda*j+k+1],1);
-  				} 
+  				}
   			}
-			else { 
+			else {
             			*info = k;
 			}
-		} 
+		}
 	}
 	ipvt[n-1] = n-1;
 	if (a[lda*(n-1)+(n-1)] == ZERO) *info = n-1;
 }
 
-/*----------------------*/ 
+/*----------------------*/
 
 static void dgesl(e_fp * RESTRICT a,int lda,int n,e_u16 ipvt[],e_fp * RESTRICT b,int job)
 /* In this function, references to a[i][j] are written a[lda*i+j].  */
@@ -561,13 +561,13 @@ static void dgesl(e_fp * RESTRICT a,int lda,int n,e_u16 ipvt[],e_fp * RESTRICT b
 			for (k = 0; k < nm1; k++) {
 				l = ipvt[k];
 				t = b[l];
-				if (l != k){ 
+				if (l != k){
 					b[l] = b[k];
 					b[k] = t;
-				}	
+				}
 				daxpy(n-(k+1),t,&a[lda*k+k+1],1,&b[k+1],1);
 			}
-		} 
+		}
 
 		/* now solve  u*x = y */
 
@@ -578,7 +578,7 @@ static void dgesl(e_fp * RESTRICT a,int lda,int n,e_u16 ipvt[],e_fp * RESTRICT b
 		    daxpy(k,t,&a[lda*k+0],1,&b[0],1);
 		}
 	}
-	else { 
+	else {
 
 		/* job = nonzero, solve  trans(a) * x = b
 		   first solve  trans(u)*y = b 			*/
@@ -605,7 +605,7 @@ static void dgesl(e_fp * RESTRICT a,int lda,int n,e_u16 ipvt[],e_fp * RESTRICT b
 	}
 }
 
-/*----------------------*/ 
+/*----------------------*/
 
 static void daxpy(int n,e_fp da,e_fp * RESTRICT dx,int incx,e_fp * RESTRICT dy,int incy)
 /*
@@ -635,13 +635,24 @@ static void daxpy(int n,e_fp da,e_fp * RESTRICT dx,int incx,e_fp * RESTRICT dy,i
       		return;
 	}
 
-	/* code for both increments equal to 1 */
-	for (i = 0;i < n; i++) {
-		dy[i] = dy[i] + da*dx[i];
+	//code for both increments equal to 1
+#if USE_RVV
+        for (i = 0;i < n;) {
+          size_t vl = __riscv_vsetvl_e32m8(n-i);
+          vfloat32m8_t dys = __riscv_vle32_v_f32m8(&dy[i], vl);
+          vfloat32m8_t dxs = __riscv_vle32_v_f32m8(&dx[i], vl);
+          dys = __riscv_vfmadd_vf_f32m8(dxs, da, dys, vl);
+          __riscv_vse32_v_f32m8(&dy[i], dys, vl);
+          i += vl;
+        }
+#else
+        for (i = 0;i < n; i++) {
+          dy[i] = dy[i] + da*dx[i];
 	}
+#endif
 }
-   
-/*----------------------*/ 
+
+/*----------------------*/
 
 static e_fp ddot(int n,e_fp *dx,int incx,e_fp *dy,int incy)
 /*
@@ -680,7 +691,7 @@ static e_fp ddot(int n,e_fp *dx,int incx,e_fp *dy,int incy)
 	return(dtemp);
 }
 
-/*----------------------*/ 
+/*----------------------*/
 static void dscal(int n,e_fp da,e_fp *dx,int incx)
 /*     scales a vector by a constant.
       jack dongarra, linpack, 3/11/78.
@@ -701,7 +712,7 @@ static void dscal(int n,e_fp da,e_fp *dx,int incx)
 		dx[i] = da*dx[i];
 }
 
-/*----------------------*/ 
+/*----------------------*/
 static int idamax(int n,e_fp *dx,int incx)
 
 /*
@@ -745,7 +756,7 @@ static int idamax(int n,e_fp *dx,int incx)
 	return (itemp);
 }
 
-/*----------------------*/ 
+/*----------------------*/
 static e_fp epslon (e_fp x)
 /*
      estimate unit roundoff in quantities of size x.
@@ -758,11 +769,11 @@ static e_fp epslon (e_fp x)
      satisfying the following two assumptions,
         1.  the base used in representing dfloating point
             numbers is not a power of three.
-        2.  the quantity  a  in statement 10 is represented to 
+        2.  the quantity  a  in statement 10 is represented to
             the accuracy used in dfloating point variables
             that are stored in memory.
      the statement number 10 and the go to 10 are intended to
-     force optimizing compilers to generate code satisfying 
+     force optimizing compilers to generate code satisfying
      assumption 2.
      under these assumptions, it should be true that,
             a  is not exactly equal to four-thirds,
@@ -790,8 +801,8 @@ static e_fp epslon (e_fp x)
 	}
 	return(eps*th_fabs((e_fp)x));
 }
- 
-/*----------------------*/ 
+
+/*----------------------*/
 static void dmxpy (int n1, e_fp * RESTRICT y, int n2, int ldm, e_fp * RESTRICT x, e_fp * RESTRICT m)
 
 /* In this function, references to m[i][j] are written m[ldm*i+j].  */
@@ -805,7 +816,7 @@ static void dmxpy (int n1, e_fp * RESTRICT y, int n2, int ldm, e_fp * RESTRICT x
      n1 integer, number of elements in vector y, and number of rows in
          matrix m
 
-     y e_fp [n1], vector of length n1 to which is added 
+     y e_fp [n1], vector of length n1 to which is added
          the product m*x
 
      n2 integer, number of elements in vector x, and number of columns
@@ -826,9 +837,9 @@ static void dmxpy (int n1, e_fp * RESTRICT y, int n2, int ldm, e_fp * RESTRICT x
 	j = n2 % 2;
 	if (j >= 1) {
 		j = j - 1;
-		for (i = 0; i < n1; i++) 
+		for (i = 0; i < n1; i++)
             		y[i] = (y[i]) + x[j]*m[ldm*j+i];
-	} 
+	}
 
 	/* cleanup odd group of two vectors */
 
@@ -838,7 +849,7 @@ static void dmxpy (int n1, e_fp * RESTRICT y, int n2, int ldm, e_fp * RESTRICT x
 		for (i = 0; i < n1; i++)
             		y[i] = ( (y[i])
                   	       + x[j-1]*m[ldm*(j-1)+i]) + x[j]*m[ldm*j+i];
-	} 
+	}
 
 	/* cleanup odd group of four vectors */
 
@@ -847,10 +858,10 @@ static void dmxpy (int n1, e_fp * RESTRICT y, int n2, int ldm, e_fp * RESTRICT x
 		j = j - 1;
 		for (i = 0; i < n1; i++)
 			y[i] = ((( (y[i])
-			       + x[j-3]*m[ldm*(j-3)+i]) 
+			       + x[j-3]*m[ldm*(j-3)+i])
 			       + x[j-2]*m[ldm*(j-2)+i])
 			       + x[j-1]*m[ldm*(j-1)+i]) + x[j]*m[ldm*j+i];
-	} 
+	}
 
 	/* cleanup odd group of eight vectors */
 
@@ -863,33 +874,29 @@ static void dmxpy (int n1, e_fp * RESTRICT y, int n2, int ldm, e_fp * RESTRICT x
 		  	       + x[j-5]*m[ldm*(j-5)+i]) + x[j-4]*m[ldm*(j-4)+i])
 			       + x[j-3]*m[ldm*(j-3)+i]) + x[j-2]*m[ldm*(j-2)+i])
 			       + x[j-1]*m[ldm*(j-1)+i]) + x[j]  *m[ldm*j+i];
-	} 
-	
+	}
+
 	/* main loop - groups of sixteen vectors */
 
 	jmin = (n2%16)+16;
 	for (j = jmin-1; j < n2; j = j + 16) {
-		for (i = 0; i < n1; i++) 
+		for (i = 0; i < n1; i++)
 			y[i] = ((((((((((((((( (y[i])
-			       	+ x[j-15]*m[ldm*(j-15)+i]) 
+			       	+ x[j-15]*m[ldm*(j-15)+i])
 				+ x[j-14]*m[ldm*(j-14)+i])
-			        + x[j-13]*m[ldm*(j-13)+i]) 
+			        + x[j-13]*m[ldm*(j-13)+i])
 				+ x[j-12]*m[ldm*(j-12)+i])
-			        + x[j-11]*m[ldm*(j-11)+i]) 
+			        + x[j-11]*m[ldm*(j-11)+i])
 				+ x[j-10]*m[ldm*(j-10)+i])
-			        + x[j- 9]*m[ldm*(j- 9)+i]) 
+			        + x[j- 9]*m[ldm*(j- 9)+i])
 				+ x[j- 8]*m[ldm*(j- 8)+i])
-			        + x[j- 7]*m[ldm*(j- 7)+i]) 
+			        + x[j- 7]*m[ldm*(j- 7)+i])
 				+ x[j- 6]*m[ldm*(j- 6)+i])
-			        + x[j- 5]*m[ldm*(j- 5)+i]) 
+			        + x[j- 5]*m[ldm*(j- 5)+i])
 				+ x[j- 4]*m[ldm*(j- 4)+i])
-			        + x[j- 3]*m[ldm*(j- 3)+i]) 
+			        + x[j- 3]*m[ldm*(j- 3)+i])
 				+ x[j- 2]*m[ldm*(j- 2)+i])
-			        + x[j- 1]*m[ldm*(j- 1)+i]) 
+			        + x[j- 1]*m[ldm*(j- 1)+i])
 				+ x[j]   *m[ldm*j+i];
 	}
-} 
-
-
-
-
+}
