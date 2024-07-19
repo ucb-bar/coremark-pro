@@ -321,6 +321,24 @@ h2v2_downsample (j_compress_ptr cinfo, jpeg_component_info * compptr,
     inptr0 = input_data[inrow];
     inptr1 = input_data[inrow+1];
     bias = 1;            /* bias = 1,2,1,2,... for successive samples */
+
+#if USE_RVV
+    size_t vl;
+    __asm__ volatile("vsetvli %0, %1, e16, m8, ta, ma" : "=r"(vl) : "r"(output_cols));
+    __asm__ volatile("vmv.v.x v0, %0" : : "r"((uint16_t)0x0201));
+    for (outcol = 0; outcol < output_cols; ) {
+      __asm__ volatile("vsetvli %0, %1, e8, m4, ta, ma" : "=r"(vl) : "r"(output_cols - outcol));
+      __asm__ volatile("vlseg2e8.v  v8, (%0)" : : "r"(&inptr0[outcol << 1]));
+      __asm__ volatile("vlseg2e8.v v16, (%0)" : : "r"(&inptr1[outcol << 1]));
+      __asm__ volatile("vwaddu.vv  v24, v8 , v12");
+      __asm__ volatile("vwaddu.wv  v24, v24, v16");
+      __asm__ volatile("vwaddu.wv  v24, v24, v20");
+      __asm__ volatile("vwaddu.wv  v24, v24, v0");
+      __asm__ volatile("vnsra.wi   v20, v24, 2");
+      __asm__ volatile("vse8.v     v20, (%0)" : : "r"(&outptr[outcol]));
+      outcol += vl;
+    }
+#else
     for (outcol = 0; outcol < output_cols; outcol++) {
       *outptr++ = (JSAMPLE) ((GETJSAMPLE(*inptr0) + GETJSAMPLE(inptr0[1]) +
                   GETJSAMPLE(*inptr1) + GETJSAMPLE(inptr1[1])
@@ -328,6 +346,7 @@ h2v2_downsample (j_compress_ptr cinfo, jpeg_component_info * compptr,
       bias ^= 3;        /* 1=>2, 2=>1 */
       inptr0 += 2; inptr1 += 2;
     }
+#endif
     inrow += 2;
   }
 }
