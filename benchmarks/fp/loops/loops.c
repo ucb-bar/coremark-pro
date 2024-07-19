@@ -1,12 +1,12 @@
 /*
-(C) 2014 EEMBC(R).  All rights reserved.                            
+(C) 2014 EEMBC(R).  All rights reserved.
 
-All EEMBC Benchmark Software are products of EEMBC 
-and are provided under the terms of the EEMBC Benchmark License Agreements.  
-The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members 
-and is protected under all applicable laws, including all applicable copyright laws.  
-If you received this EEMBC Benchmark Software without having 
-a currently effective EEMBC Benchmark License Agreement, you must discontinue use. 
+All EEMBC Benchmark Software are products of EEMBC
+and are provided under the terms of the EEMBC Benchmark License Agreements.
+The EEMBC Benchmark Software are proprietary intellectual properties of EEMBC and its Members
+and is protected under all applicable laws, including all applicable copyright laws.
+If you received this EEMBC Benchmark Software without having
+a currently effective EEMBC Benchmark License Agreement, you must discontinue use.
 Please refer to LICENSE.md for the specific license agreement that pertains to this Benchmark Software.
 */
 
@@ -42,7 +42,7 @@ extern void init_preset_7();
 /* ======================================================================== */
 /* file provides :
 define - init base input params (segment [within 0..2 boundary], number of coefficients to calculate, number of integration steps)
-init -  allocate working memory, assign a[0] and b[0] . 
+init -  allocate working memory, assign a[0] and b[0] .
 run - calculate N coefficients in the segment
 fini - calculate avg of coeffients then dealloc working memory
 verify - SNR average of coefficients vs golden reference, must run at least base iterations for valid output.
@@ -117,31 +117,31 @@ benchfunc all_tests[] = {
 char *test_type_str[] = {
 	"MONTE_CARLO_PI_IDX			",
 	"HYDRO_IDX					",
-	"CHOLESKY_IDX				",			
-	"INNER_PRODUCT_IDX			",	
-	"BANDED_LINEAR_IDX			",	
-	"TRI_DIAGONAL_IDX			",	
-	"LINEAR_RECURRENCE_IDX		",	
-	"STATE_FRAGMENT_IDX			",	
-	"ADI_INTEGRATION_IDX		",	
-	"INTEGRATE_PREDICTORS_IDX	",	
-	"DIFFERENCE_PREDICTORS_IDX	",	
-	"FIRST_SUM_IDX				",	
-	"FIRST_DIF_IDX				",	
-	"PIC_2D_IDX					",	
-	"PIC_1D_IDX					",	
-	"CASUAL_IDX					",	
-	"MONTE_CARLO_IDX			",	
-	"IMPLICIT_IDX				",	
-	"HYDRO_2D_IDX				",	
-	"LIN_RECURRENCE_IDX			",	
-	"ORDINATE_TRANSPORT_IDX		",	
-	"MATMUL_IDX					",	
-	"PLANCKIAN_IDX				",	
-	"HYDRO_2D_IMPLICIT_IDX		",	
-	"FIRSTMIN_IDX				",	
-	"LAST_TEST_IDX				"			
-};                  
+	"CHOLESKY_IDX				",
+	"INNER_PRODUCT_IDX			",
+	"BANDED_LINEAR_IDX			",
+	"TRI_DIAGONAL_IDX			",
+	"LINEAR_RECURRENCE_IDX		",
+	"STATE_FRAGMENT_IDX			",
+	"ADI_INTEGRATION_IDX		",
+	"INTEGRATE_PREDICTORS_IDX	",
+	"DIFFERENCE_PREDICTORS_IDX	",
+	"FIRST_SUM_IDX				",
+	"FIRST_DIF_IDX				",
+	"PIC_2D_IDX					",
+	"PIC_1D_IDX					",
+	"CASUAL_IDX					",
+	"MONTE_CARLO_IDX			",
+	"IMPLICIT_IDX				",
+	"HYDRO_2D_IDX				",
+	"LIN_RECURRENCE_IDX			",
+	"ORDINATE_TRANSPORT_IDX		",
+	"MATMUL_IDX					",
+	"PLANCKIAN_IDX				",
+	"HYDRO_2D_IMPLICIT_IDX		",
+	"FIRSTMIN_IDX				",
+	"LAST_TEST_IDX				"
+};
 #endif
 
 e_fp *reinit_vec_limited(loops_params *params, e_fp *p, int nvals) {
@@ -153,13 +153,28 @@ e_fp *reinit_vec_limited(loops_params *params, e_fp *p, int nvals) {
 	}
 	return p;
 }
+
+#define MIN(a,b)    ((a) < (b) ? (a) : (b))
+
 e_fp *reinit_vec(loops_params *params, e_fp *p, int nvals) {
 	int i=0;
 	int si=random_u32(params->r);
-	while (i<nvals) {
+
+#if USE_RVV
+        si = si & 0xfff;
+        while (i<nvals) {
+          size_t vl = __riscv_vsetvl_e32m8(MIN(nvals - i, 0x1000 - si));
+          vfloat32m8_t v = __riscv_vle32_v_f32m8(&params->rbank[si], vl);
+          __riscv_vse32_v_f32m8(&p[i], v, vl);
+          i += vl;
+          si = (si + vl) & 0xfff;
+        }
+#else
+        while (i<nvals) {
 		p[i]=params->rbank[si++ & 0xfff];
 		i++;
 	}
+#endif
 	return p;
 }
 e_fp *reinit_vec_sparse(loops_params *params, e_fp *p, int nvals, int step) {
@@ -208,7 +223,7 @@ void reinit_ivec_sparse(loops_params *params, e_u32 *p, int nvals, e_u32 mask, i
 void reinit_vec_const(loops_params *params, e_fp *p, int nvals, e_fp val) {
 	int i;
 
-	for (i=0 ; i<nvals; i++) 
+	for (i=0 ; i<nvals; i++)
 		p[i]=val;
 }
 void zero_vec( e_fp *p, int nvals)
@@ -240,8 +255,8 @@ static e_fp get_array_feedback(e_fp *a, int maxidx) {
 
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nfeed %d:",debug_counter++);
-	th_print_fp(ret);	
-#endif	
+	th_print_fp(ret);
+#endif
 	return ret/(e_fp)maxidx;
 }
 /* Benchmark */
@@ -249,7 +264,7 @@ void *define_params_loops(unsigned int idx, char *name, char *dataset) {
     loops_params *params;
 	e_u32 data_index=idx, req_bits=0;
 	unsigned int default_disable_mask=0;
-	
+
 	th_memset(presets_loops,0,sizeof(presets_loops));
 	init_preset_0();
 	init_preset_1();
@@ -268,22 +283,22 @@ void *define_params_loops(unsigned int idx, char *name, char *dataset) {
 	params->gen_ref=0;
 	params->seed=73686179;
 	params->ref_data=NULL;
-	params->N=1024;  
-	params->Loop=100;  
+	params->N=1024;
+	params->Loop=100;
 	params->reinit_step=1;
 	default_disable_mask = ~(FIRST_SUM|FIRST_DIF|FIRSTMIN|TRI_DIAGONAL|LINEAR_RECURRENCE|IMPLICIT|HYDRO_2D|INNER_PRODUCT);
 	params->tests=0xffffffff & default_disable_mask;
 	params->limit_int_input=0;
-	
+
 	if (pgo_training_run!=0) {
-		data_index=4; 
+		data_index=4;
 	} else {
 		th_parse_buf_flag_unsigned(dataset,"-i",&data_index);
 	}
 	/* preset datasets */
 	if (data_index<NUM_DATAS) {
 		th_memcpy(params,&(presets_loops[data_index]),sizeof(loops_params));
-	} 
+	}
 	/* command line overrides */
 	if (pgo_training_run==0) {
 		th_parse_buf_flag_unsigned(dataset,"-s",&params->seed);
@@ -346,10 +361,10 @@ void *define_params_loops(unsigned int idx, char *name, char *dataset) {
 		params->nsize[INTEGRATE_PREDICTORS_IDX]=params->N/13;
 		params->nsize[DIFFERENCE_PREDICTORS_IDX]=params->N/14;
 		params->nsize[CASUAL_IDX]=params->N/7;
-		params->nsize[MONTE_CARLO_IDX]=m2/4;		
-		params->nsize[PIC_1D_IDX]=pow2(params->N);		
+		params->nsize[MONTE_CARLO_IDX]=m2/4;
+		params->nsize[PIC_1D_IDX]=pow2(params->N);
 	}
-	
+
 	params->vsize=params->N;
 	params->vsize+=params->Loop;
 	params->ivsize=params->N;
@@ -400,20 +415,20 @@ void dump_sparse_data(loops_params *p) {
 	int i,j;
 	for (i=0; i<num_vectors; i++) {
 		th_printf("* v[%d]:\n",i);
-		for (j=0; j<p->vsize; j+=p->reinit_step) 
+		for (j=0; j<p->vsize; j+=p->reinit_step)
 			th_print_fp(p->v[i][j]);
 		th_printf("* iv[%d]:\n",i);
-		for (j=0; j<p->ivsize; j+=p->reinit_step) 
+		for (j=0; j<p->ivsize; j+=p->reinit_step)
 			th_printf("%08x,",p->iv[i][j]);
 	}
 	for (i=0; i<num_2d_matrixes; i++) {
 		th_printf("* m2[%d]:\n",i);
-		for (j=0; j<p->m2size; j+=p->reinit_step) 
+		for (j=0; j<p->m2size; j+=p->reinit_step)
 			th_print_fp(p->m2[i][j]);
 	}
 	for (i=0; i<num_3d_matrixes; i++) {
 		th_printf("* m3[%d]:\n",i);
-		for (j=0; j<p->m3size; j+=p->reinit_step) 
+		for (j=0; j<p->m3size; j+=p->reinit_step)
 			th_print_fp(p->m3[i][j]);
 	}
 }
@@ -438,29 +453,29 @@ void *bmark_init_loops(void *in_params) {
 		if (i<4) spacer=10;
 		else spacer=0;
 		myparams->v[i]=(e_fp *)th_malloc(sizeof(e_fp)*(myparams->vsize+spacer));
-		if ( myparams->v[i] == NULL ) 
+		if ( myparams->v[i] == NULL )
 			th_exit( THE_OUT_OF_MEMORY, "Cannot Allocate Memory %s:%d", __FILE__,__LINE__ );
 	}
 	myparams->iv=(e_u32 **)th_malloc(sizeof(e_u32 *)*num_vectors);
 	for (i=0; i<num_vectors; i++) {
 		myparams->iv[i]=(e_u32 *)th_malloc(sizeof(e_u32)*myparams->ivsize);
-		if ( myparams->iv[i] == NULL ) 
+		if ( myparams->iv[i] == NULL )
 			th_exit( THE_OUT_OF_MEMORY, "Cannot Allocate Memory %s:%d", __FILE__,__LINE__ );
 	}
 	myparams->v2=(e_fp *)th_calloc(1,sizeof(e_fp)*(LAST_TEST_IDX+1));
-	if ( myparams->v2 == NULL ) 
+	if ( myparams->v2 == NULL )
 		th_exit( THE_OUT_OF_MEMORY, "Cannot Allocate Memory %s:%d", __FILE__,__LINE__ );
-	
+
 	myparams->m2=(e_fp **)th_malloc(sizeof(e_fp *)*num_2d_matrixes);
 	for (i=0; i<num_2d_matrixes; i++) {
 		myparams->m2[i]=(e_fp *)th_malloc(sizeof(e_fp)*myparams->m2size);
-		if ( myparams->m2[i] == NULL ) 
+		if ( myparams->m2[i] == NULL )
 			th_exit( THE_OUT_OF_MEMORY, "Cannot Allocate Memory %s:%d", __FILE__,__LINE__ );
 	}
 	myparams->m3=(e_fp **)th_malloc(sizeof(e_fp *)*num_3d_matrixes);
 	for (i=0; i<num_3d_matrixes; i++) {
 		myparams->m3[i]=(e_fp *)th_malloc(sizeof(e_fp)*myparams->m3size);
-		if ( myparams->m3[i] == NULL ) 
+		if ( myparams->m3[i] == NULL )
 			th_exit( THE_OUT_OF_MEMORY, "Cannot Allocate Memory %s:%d", __FILE__,__LINE__ );
 	}
 	reset_all_data(myparams);
@@ -477,7 +492,7 @@ void *bmark_fini_loops(void *in_params) {
 	myparams=(loops_params *)in_params;
 	/* Cleanup working buffers */
 	if (myparams->v) {
-	for (i=0; i<num_vectors; i++) 
+	for (i=0; i<num_vectors; i++)
 		th_free(myparams->v[i]);
 	th_free(myparams->v);
 	}
@@ -485,20 +500,20 @@ void *bmark_fini_loops(void *in_params) {
 		th_free(myparams->v2);
 	}
 	if (myparams->iv) {
-	for (i=0; i<num_vectors; i++) 
+	for (i=0; i<num_vectors; i++)
 		th_free(myparams->iv[i]);
 	th_free(myparams->iv);
 	}
 	if (myparams->m2) {
-	for (i=0; i<num_2d_matrixes; i++) 
+	for (i=0; i<num_2d_matrixes; i++)
 		th_free(myparams->m2[i]);
 	th_free(myparams->m2);
-	}		
+	}
 	if (myparams->m3) {
-	for (i=0; i<num_3d_matrixes; i++) 
+	for (i=0; i<num_3d_matrixes; i++)
 		th_free(myparams->m3[i]);
 	th_free(myparams->m3);
-	}		
+	}
 
 	th_free(myparams);
 
@@ -512,7 +527,7 @@ void *t_run_test_loops(struct TCDef *tcdef,void *in_params) {
 	e_u32 test_num=0;
 	e_u32 test;
 	//test_type run_test;
-	
+
 	tcdef->CRC=0;
 	params->r=rand_init(params->seed,256,-1e10,1e10);
 	while (test_num<LAST_TEST_IDX) {
@@ -526,7 +541,7 @@ void *t_run_test_loops(struct TCDef *tcdef,void *in_params) {
 			break;
 #if VERBOSE
 		th_printf("Running %s\n",test_type_str[test_num]);
-#endif			
+#endif
 		params->N=params->nsize[test_num];
 		params->Loop=params->nruns[test_num];
 		retval=all_tests[test_num](params);
@@ -538,24 +553,24 @@ void *t_run_test_loops(struct TCDef *tcdef,void *in_params) {
 	rand_fini(params->r);
 	params->v2[LAST_TEST_IDX]=val;
 	params->val=val;
-	
+
 	/* If ref data available, do a quick check */
 	if (!params->gen_ref && params->ref_data) {
 		test=fp_iaccurate_bits(val,&params->ref_data[LAST_TEST_IDX]);
 		if (test>=params->minbits)
 			tcdef->CRC=0;
-		else 
+		else
 			tcdef->CRC=1;
 		tcdef->v4=test;
 	}
-	
+
 	/* Setup values */
 	tcdef->v1=params->baseN;
 	tcdef->v2=params->Loop;
 	tcdef->v3=params->seed;
 	/* Result values */
 	tcdef->dbl_data[0]=params->val;
-	
+
 	return params;
 }
 
@@ -566,14 +581,14 @@ int bmark_verify_loops(void *in_params) {
 	if (params->gen_ref) {
 		int i;
 		th_printf("/**** START DATASET ****/\n#include \"th_lib.h\"\n#include \"../loops.h\"\n");
-		th_printf("static intparts ref_data_index[]={\n"); 
+		th_printf("static intparts ref_data_index[]={\n");
 		for (i=0; i<LAST_TEST_IDX+1; i++) {
 			th_printf("\t");
 			th_print_fp(params->v2[i]);
 			if (i<LAST_TEST_IDX)
 				th_printf(",\n");
 		}
-		th_printf("\n}; /* ref_data */\n\n"); 
+		th_printf("\n}; /* ref_data */\n\n");
 		th_printf("void init_preset_index() {\n");
 		th_printf("presets_loops[index].seed=0x%x;\n",params->seed);
 		th_printf("presets_loops[index].N=0x%x;\n",params->baseN);
@@ -617,6 +632,18 @@ e_fp MonteCarlo_integrate(loops_params *p)
 	for (outer=0; outer<oloop; outer++) {
 		reinit_vec(p,px,iloop);
 		reinit_vec(p,py,iloop);
+#if USE_RVV
+                for (inner=0; inner<iloop; ) {
+                  size_t vl = __riscv_vsetvl_e32m8(iloop-inner);
+                  vfloat32m8_t xs = __riscv_vle32_v_f32m8(&px[inner], vl);
+                  vfloat32m8_t ys = __riscv_vle32_v_f32m8(&py[inner], vl);
+                  vfloat32m8_t x2 = __riscv_vfmul_vv_f32m8(xs, xs, vl);
+                  vfloat32m8_t r = __riscv_vfmadd_vv_f32m8(ys, ys, x2, vl);
+                  vbool4_t b = __riscv_vmfle_vf_f32m8_b4(r, FPCONST(1.0), vl);
+                  under_curve += __riscv_vcpop_m_b4(b, vl);
+                  inner += iloop;
+                }
+#else
 		for (inner=0; inner<iloop; inner++)
 		{
 			e_fp x=px[inner];
@@ -625,6 +652,7 @@ e_fp MonteCarlo_integrate(loops_params *p)
 			if ( x*x + y*y <= FPCONST(1.0))
 				 under_curve ++;
 		}
+#endif
 	}
 
 	return ((e_fp) under_curve / Num_samples) * FPCONST(4.0);
@@ -648,15 +676,15 @@ e_fp hydro_fragment(loops_params *p) {
 	 * 	SG: Original code had only the last iteration of the outer loop mattered.
 	 *	modified to get feedback from x between iterations.
      */
-	 
+
     for ( l=1 ; l<=loop ; l++ ) {
 		reinit_vec(p,z,n+11); /* force multiple iterations with new data for each iteration */
-        for ( k=0 ; k<n ; k++ ) { 
+        for ( k=0 ; k<n ; k++ ) {
             x[k] = q + y[k]*( r*z[k+10] + t*z[k+11] );
         }
 		ret+=get_array_feedback(x,n); /* force the calculation */
     }
-	
+
 	return ret;
 }
 
@@ -715,7 +743,7 @@ e_fp inner_product(loops_params *p) {
     e_fp q = FPCONST(0.0);
 	reinit_vec_limited(p,x,p->vsize);
 	reinit_vec_limited(p,z,p->vsize);
-	
+
     /*
      *******************************************************************
      *   Kernel 3 -- inner product
@@ -734,8 +762,8 @@ e_fp inner_product(loops_params *p) {
         }
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\niprod %d:",debug_counter++);
-	th_print_fp(q);	
-#endif	
+	th_print_fp(q);
+#endif
     }
 	return q;
 }
@@ -748,7 +776,7 @@ e_fp banded_linear(loops_params *p) {
 	e_fp temp,ret;
 	reinit_vec(p,x,p->vsize);
 	reinit_vec(p,y,p->vsize);
-	
+
 	if (p->N<1001) {
 		th_exit(THE_FAILURE,"Bad size for banded linear equations, must be at least 1001");
 	}
@@ -810,7 +838,7 @@ e_fp tri_diagonal(loops_params *p) {
 
     for ( l=1 ; l<=loop ; l++ ) {
         for ( i=1 ; i<n ; i++ ) {
-            x[i] = z[i]*( y[i] - x[i-1] ); 
+            x[i] = z[i]*( y[i] - x[i-1] );
 			if (!th_isfinite(x[i])) x[i]=y[i]; /* modified to avoid potential inf */
         }
 		x[0]=z[0]*( y[0] - x[n-1] );
@@ -896,6 +924,10 @@ e_fp state_fragment(loops_params *p) {
 	return ret;
 }
 
+uint32_t hex(float f) {
+  return *((uint32_t*)(&f));
+}
+
 e_fp adi_integration(loops_params *p) {
 	e_fp *du1=p->v[0],  *du2=p->v[1],  *du3=p->v[2]; /* temporary outputs */
 	e_fp *u1=p->m3[0],  *u2=p->m3[1],  *u3=p->m3[2];
@@ -936,33 +968,214 @@ e_fp adi_integration(loops_params *p) {
      */
 
     for ( l=1 ; l<=loop ; l++ ) {
-		reinit_vec(p,u1,(n+1)*3);
-		reinit_vec(p,u2,(n+1)*3);
-		reinit_vec(p,u3,(n+1)*3);
-        nl2 = 1;
-        for ( kx=1 ; kx<3 ; kx++ ){
-            for ( ky=1 ; ky<n ; ky++ ) {
-				int next=(ky+1)*3+kx;
-				int prev=(ky-1)*3+kx;
-				int cur=(ky)*3+kx;
-				int iout=nl2*n*3+ky*3+kx;
-               du1[ky] = u1[next] - u1[prev];
-               du2[ky] = u2[next] - u2[prev];
-               du3[ky] = u3[next] - u3[prev];
-               u1[iout]=
-                  u1[cur]+a11*du1[ky]+a12*du2[ky]+a13*du3[ky] + sig*
-                     (u1[cur+1]-FPCONST(2.0)*u1[cur]+u1[cur-1]);
-               u2[iout]=
-                  u2[cur]+a21*du1[ky]+a22*du2[ky]+a23*du3[ky] + sig*
-                     (u2[cur+1]-FPCONST(2.0)*u2[cur]+u2[cur-1]);
-               u3[iout]=
-                  u3[cur]+a31*du1[ky]+a32*du2[ky]+a33*du3[ky] + sig*
-                     (u3[cur+1]-FPCONST(2.0)*u3[cur]+u3[cur-1]);
-            }
-        }
-		ret+=get_array_feedback(&u1[3*n],3*n)+get_array_feedback(&u2[3*n],3*n)+get_array_feedback(&u3[3*n],3*n);
+      reinit_vec(p,u1,(n+1)*3);
+      reinit_vec(p,u2,(n+1)*3);
+      reinit_vec(p,u3,(n+1)*3);
+      nl2 = 1;
+#if USE_RVV
+      for (ky = 1; ky < n; ) {
+        size_t vl;
+        int curb = (ky)*3;
+        int ioutb = nl2*n*3+ky*3;
+        __asm__ volatile("vsetvli %0, %0, e32, m1, ta, ma" : "=r"(vl) : "r"(n - ky));
+        //         -2    -1     0   1     2    3    4    5
+        // u1: ( ,  v6,  v7) ( v3,  v4,  v5) ( v0,  v1,  v2)
+        // u2: ( , v14, v15) (v11, v12, v13) ( v8,  v9, v10)
+        // u3: ( , v22, v23) (v19, v20, v21) (v16, v17, v18)
+        __asm__ volatile("vlseg3e32.v     v0, (%0)"    : : "r"(&u1[curb+3]));
+        __asm__ volatile("vfslide1up.vf   v3,  v0, %0" : : "f"(u1[curb+0]));
+        __asm__ volatile("vfslide1up.vf   v4,  v1, %0" : : "f"(u1[curb+1]));
+        __asm__ volatile("vfslide1up.vf   v5,  v2, %0" : : "f"(u1[curb+2]));
+        __asm__ volatile("vfslide1up.vf   v6,  v4, %0" : : "f"(u1[curb-2]));
+        __asm__ volatile("vfslide1up.vf   v7,  v5, %0" : : "f"(u1[curb-1]));
+
+        __asm__ volatile("vlseg3e32.v     v8, (%0)"    : : "r"(&u2[curb+3]));
+        __asm__ volatile("vfslide1up.vf  v11,  v8, %0" : : "f"(u2[curb+0]));
+        __asm__ volatile("vfslide1up.vf  v12,  v9, %0" : : "f"(u2[curb+1]));
+        __asm__ volatile("vfslide1up.vf  v13, v10, %0" : : "f"(u2[curb+2]));
+        __asm__ volatile("vfslide1up.vf  v14, v12, %0" : : "f"(u2[curb-2]));
+        __asm__ volatile("vfslide1up.vf  v15, v13, %0" : : "f"(u2[curb-1]));
+
+        __asm__ volatile("vlseg3e32.v    v16, (%0)"    : : "r"(&u3[curb+3]));
+        __asm__ volatile("vfslide1up.vf  v19, v16, %0" : : "f"(u3[curb+0]));
+        __asm__ volatile("vfslide1up.vf  v20, v17, %0" : : "f"(u3[curb+1]));
+        __asm__ volatile("vfslide1up.vf  v21, v18, %0" : : "f"(u3[curb+2]));
+        __asm__ volatile("vfslide1up.vf  v22, v20, %0" : : "f"(u3[curb-2]));
+        __asm__ volatile("vfslide1up.vf  v23, v21, %0" : : "f"(u3[curb-1]));
+
+        __asm__ volatile("vfsub.vv       v24,  v1,  v6");                       // d11: v24
+        __asm__ volatile("vfsub.vv       v25,  v9, v14");                       // d21: v25
+        __asm__ volatile("vfsub.vv       v26, v17, v22");                       // d31: v26
+        __asm__ volatile("vfsub.vv       v27,  v2,  v7");                       // d12: v27
+        __asm__ volatile("vfsub.vv       v28, v10, v15");                       // d22: v28
+        __asm__ volatile("vfsub.vv       v29, v18, v23");                       // d33: v29
+
+        __asm__ volatile("vmv.v.v        v30,  v5");
+        __asm__ volatile("vfmacc.vf      v30,  %0,  v4": : "f"(-FPCONST(2.0))); //                                          u1p[2]-FPCONST(2.0)*u1p[1]        ;
+        __asm__ volatile("vfadd.vv        v3, v30,  v3");                       //                                                                    +u1p[0] ;
+        __asm__ volatile("vmv.v.v        v30,  v4");
+        __asm__ volatile("vfmacc.vf      v30,  %0, v24": : "f"(a11));           // u1p[1]+a11*du11                                                            ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v25": : "f"(a12));           //                +a12*du21                                                   ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v26": : "f"(a13));           //                         +a13*du31                                          ;
+        __asm__ volatile("vfmacc.vf      v30,  %0,  v3": : "f"(sig));           //                                   + sig*(                                 );
+
+        __asm__ volatile("vfmacc.vf       v0,  %0,  v5": : "f"(-FPCONST(2.0))); //                                          u1p[3]-FPCONST(2.0)*u1p[2]        ;
+        __asm__ volatile("vfadd.vv        v0,  v0,  v4");                       //                                                                    +u1p[1] ;
+        __asm__ volatile("vmv.v.v        v31,  v5");
+        __asm__ volatile("vfmacc.vf      v31,  %0, v27": : "f"(a11));           // u1p[2]+a11*du12                                                            ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v28": : "f"(a12));           //                +a12*du22                                                   ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v29": : "f"(a13));           //                         +a13*du32                                          ;
+        __asm__ volatile("vfmacc.vf      v31,  %0,  v0": : "f"(sig));           //                                   + sig*(                                 );
+
+        __asm__ volatile("vssseg2e32.v   v30, (%0), %1": : "r"(&u1[ioutb+1]), "r"(3*sizeof(float)));
+
+        __asm__ volatile("vmv.v.v        v30, v13");
+        __asm__ volatile("vfmacc.vf      v30,  %0, v12": : "f"(-FPCONST(2.0))); //                                          u2p[2]-FPCONST(2.0)*u2p[1]        ;
+        __asm__ volatile("vfadd.vv       v11, v30, v11");                       //                                                                    +u2p[0] ;
+        __asm__ volatile("vmv.v.v        v30, v12");
+        __asm__ volatile("vfmacc.vf      v30,  %0, v24": : "f"(a21));           // u2p[1]+a21*du11                                                            ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v25": : "f"(a22));           //                +a22*du21                                                   ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v26": : "f"(a23));           //                         +a23*du31                                          ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v11": : "f"(sig));           //                                   + sig*(                                 );
+
+        __asm__ volatile("vfmacc.vf       v8,  %0, v13": : "f"(-FPCONST(2.0))); //                                          u2p[3]-FPCONST(2.0)*u2p[2]        ;
+        __asm__ volatile("vfadd.vv        v8,  v8, v12");                       //                                                                    +u2p[1] ;
+        __asm__ volatile("vmv.v.v        v31, v13");
+        __asm__ volatile("vfmacc.vf      v31,  %0, v27": : "f"(a21));           // u2p[2]+a21*du12                                                            ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v28": : "f"(a22));           //                +a22*du22                                                   ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v29": : "f"(a23));           //                         +a23*du32                                          ;
+        __asm__ volatile("vfmacc.vf      v31,  %0,  v8": : "f"(sig));           //                                   + sig*(                                 );
+
+        __asm__ volatile("vssseg2e32.v   v30, (%0), %1": : "r"(&u2[ioutb+1]), "r"(3*sizeof(float)));
+
+        __asm__ volatile("vmv.v.v        v30, v21");
+        __asm__ volatile("vfmacc.vf      v30,  %0, v20": : "f"(-FPCONST(2.0))); //                                          u3p[2]-FPCONST(2.0)*u3p[1]        ;
+        __asm__ volatile("vfadd.vv       v19, v30, v19");                       //                                                                    +u3p[0] ;
+        __asm__ volatile("vmv.v.v        v30, v20");
+        __asm__ volatile("vfmacc.vf      v30,  %0, v24": : "f"(a31));           // u3p[1]+a31*du11                                                            ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v25": : "f"(a32));           //                +a32*du21                                                   ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v26": : "f"(a33));           //                         +a33*du31                                          ;
+        __asm__ volatile("vfmacc.vf      v30,  %0, v19": : "f"(sig));           //                                   + sig*(                                 );
+
+        __asm__ volatile("vfmacc.vf      v16,  %0, v21": : "f"(-FPCONST(2.0))); //                                          u3p[3]-FPCONST(2.0)*u3p[2]        ;
+        __asm__ volatile("vfadd.vv       v16, v16, v20");                       //                                                                    +u3p[1] ;
+        __asm__ volatile("vmv.v.v        v31, v21");
+        __asm__ volatile("vfmacc.vf      v31,  %0, v27": : "f"(a31));           // u3p[2]+a31*du12                                                            ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v28": : "f"(a32));           //                +a32*du22                                                   ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v29": : "f"(a33));           //                         +a33*du32                                          ;
+        __asm__ volatile("vfmacc.vf      v31,  %0, v16": : "f"(sig));           //                                   + sig*(                                 );
+
+        __asm__ volatile("vssseg2e32.v   v30, (%0), %1": : "r"(&u3[ioutb+1]), "r"(3*sizeof(float)));
+
+        ky += vl;
+      }
+      /* for ( ky=1 ; ky<n ; ky++ ) { */
+      /*   int curb = (ky)*3; */
+      /*   int ioutb = nl2*n*3+ky*3; */
+      /*   float du11, du21, du31, du12, du22, du32; */
+
+      /*   float* u1p = u1 + curb; */
+      /*   float* u2p = u2 + curb; */
+      /*   float* u3p = u3 + curb; */
+      /*   // (-2 -1) (0 1 2) (3 4 5) */
+      /*   du11 = u1p[4] - u1p[-2]; */
+      /*   du21 = u2p[4] - u2p[-2]; */
+      /*   du31 = u3p[4] - u3p[-2]; */
+      /*   du12 = u1p[5] - u1p[-1]; */
+      /*   du22 = u2p[5] - u2p[-1]; */
+      /*   du32 = u3p[5] - u3p[-1]; */
+
+      /*   float u11 = u1p[1]+a11*du11+a12*du21+a13*du31 + sig*(u1p[2]-FPCONST(2.0)*u1p[1]+u1p[0]); */
+      /*   float u21 = u2p[1]+a21*du11+a22*du21+a23*du31 + sig*(u2p[2]-FPCONST(2.0)*u2p[1]+u2p[0]); */
+      /*   float u31 = u3p[1]+a31*du11+a32*du21+a33*du31 + sig*(u3p[2]-FPCONST(2.0)*u3p[1]+u3p[0]); */
+
+      /*   float u12 = u1p[2]+a11*du12+a12*du22+a13*du32 + sig*(u1p[3]-FPCONST(2.0)*u1p[2]+u1p[1]); */
+      /*   float u22 = u2p[2]+a21*du12+a22*du22+a23*du32 + sig*(u2p[3]-FPCONST(2.0)*u2p[2]+u2p[1]); */
+      /*   float u32 = u3p[2]+a31*du12+a32*du22+a33*du32 + sig*(u3p[3]-FPCONST(2.0)*u3p[2]+u3p[1]); */
+
+        /* printf("u1p %x %x %x %x %x %x %x %x\n", */
+        /*        hex(u1p[-2]), hex(u1p[-1]), hex(u1p[0]), hex(u1p[1]), hex(u1p[2]), hex(u1p[3]), hex(u1p[4]), hex(u1p[5])); */
+        /* printf("u2p %x %x %x %x %x %x %x %x\n", */
+        /*        hex(u2p[-2]), hex(u2p[-1]), hex(u2p[0]), hex(u2p[1]), hex(u2p[2]), hex(u2p[3]), hex(u2p[4]), hex(u2p[5])); */
+        /* printf("u3p %x %x %x %x %x %x %x %x\n", */
+        /*        hex(u3p[-2]), hex(u3p[-1]), hex(u3p[0]), hex(u3p[1]), hex(u3p[2]), hex(u3p[3]), hex(u3p[4]), hex(u3p[5])); */
+        /* printf("du %x %x %x %x %x %x\n", hex(du11), hex(du21), hex(du31), hex(du12), hex(du22), hex(du32)); */
+
+        /* printf("%x %x %x %x %x %x\n", */
+        /*        hex(u1p[2]-FPCONST(2.0)*u1p[1]), */
+        /*        hex(u1p[2]-FPCONST(2.0)*u1p[1]+u1p[0]), */
+        /*        hex(u1p[1]+a11*du11), */
+        /*        hex(u1p[1]+a11*du11+a12*du21), */
+        /*        hex(u1p[1]+a11*du11+a12*du21+a13*du31), */
+        /*        hex(u1p[1]+a11*du11+a12*du21+a13*du31+sig*(u1p[2]-FPCONST(2.0)*u1p[1]+u1p[0]))); */
+
+        /* printf("%x %x\n", hex(u11), hex(u1[(ioutb+1)])); */
+        /* printf("%x %x\n", hex(u21), hex(u2[(ioutb+1)])); */
+        /* printf("%x %x\n", hex(u31), hex(u3[(ioutb+1)])); */
+        /* printf("%x %x\n", hex(u12), hex(u1[(ioutb+2)])); */
+        /* printf("%x %x\n", hex(u22), hex(u2[(ioutb+2)])); */
+        /* printf("%x %x\n", hex(u32), hex(u3[(ioutb+2)])); */
+
+        /* if (u11 != u1[(ioutb+1)]) exit(1); */
+        /* if (u21 != u2[(ioutb+1)]) exit(1); */
+        /* if (u31 != u3[(ioutb+1)]) exit(1); */
+        /* if (u12 != u1[(ioutb+2)]) exit(1); */
+        /* if (u22 != u2[(ioutb+2)]) exit(1); */
+        /* if (u32 != u3[(ioutb+2)]) exit(1); */
+
+      /* } */
+
+#else
+      for ( ky=1 ; ky<n ; ky++ ) {
+        int curb = (ky)*3;
+        int ioutb = nl2*n*3+ky*3;
+        float du11, du21, du31, du12, du22, du32;
+
+        float* u1p = u1 + curb;
+        float* u2p = u2 + curb;
+        float* u3p = u3 + curb;
+        // (-2 -1) (0 1 2) (3 4 5)
+        du11 = u1p[4] - u1p[-2];
+        du21 = u2p[4] - u2p[-2];
+        du31 = u3p[4] - u3p[-2];
+        du12 = u1p[5] - u1p[-1];
+        du22 = u2p[5] - u2p[-1];
+        du32 = u3p[5] - u3p[-1];
+
+        u1[(ioutb+1)]= u1p[1]+a11*du11+a12*du21+a13*du31 + sig*(u1p[2]-FPCONST(2.0)*u1p[1]+u1p[0]);
+        u2[(ioutb+1)]= u2p[1]+a21*du11+a22*du21+a23*du31 + sig*(u2p[2]-FPCONST(2.0)*u2p[1]+u2p[0]);
+        u3[(ioutb+1)]= u3p[1]+a31*du11+a32*du21+a33*du31 + sig*(u3p[2]-FPCONST(2.0)*u3p[1]+u3p[0]);
+
+        u1[(ioutb+2)]= u1p[2]+a11*du12+a12*du22+a13*du32 + sig*(u1p[3]-FPCONST(2.0)*u1p[2]+u1p[1]);
+        u2[(ioutb+2)]= u2p[2]+a21*du12+a22*du22+a23*du32 + sig*(u2p[3]-FPCONST(2.0)*u2p[2]+u2p[1]);
+        u3[(ioutb+2)]= u3p[2]+a31*du12+a32*du22+a33*du32 + sig*(u3p[3]-FPCONST(2.0)*u3p[2]+u3p[1]);
+
+      }
+
+      /* for ( kx=1 ; kx<3 ; kx++ ){ */
+      /*   for ( ky=1 ; ky<n ; ky++ ) { */
+      /*     int next=(ky+1)*3+kx; */
+      /*     int prev=(ky-1)*3+kx; */
+      /*     int cur=(ky)*3+kx; */
+      /*     int iout=nl2*n*3+ky*3+kx; */
+      /*     du1[ky] = u1[next] - u1[prev]; */
+      /*     du2[ky] = u2[next] - u2[prev]; */
+      /*     du3[ky] = u3[next] - u3[prev]; */
+      /*     u1[iout]= */
+      /*       u1[cur]+a11*du1[ky]+a12*du2[ky]+a13*du3[ky] + sig* */
+      /*       (u1[cur+1]-FPCONST(2.0)*u1[cur]+u1[cur-1]); */
+      /*     u2[iout]= */
+      /*       u2[cur]+a21*du1[ky]+a22*du2[ky]+a23*du3[ky] + sig* */
+      /*       (u2[cur+1]-FPCONST(2.0)*u2[cur]+u2[cur-1]); */
+      /*     u3[iout]= */
+      /*       u3[cur]+a31*du1[ky]+a32*du2[ky]+a33*du3[ky] + sig* */
+      /*       (u3[cur+1]-FPCONST(2.0)*u3[cur]+u3[cur-1]); */
+      /*   } */
+      /* } */
+#endif
+        ret+=get_array_feedback(&u1[3*n],3*n)+get_array_feedback(&u2[3*n],3*n)+get_array_feedback(&u3[3*n],3*n);
     }
-	return ret;
+    return ret;
 }
 
 e_fp integrate_predictors(loops_params *p) {
@@ -992,13 +1205,13 @@ e_fp integrate_predictors(loops_params *p) {
                        dm[25]*px[i*13+ 9] + dm[24]*px[i*13+ 8] + dm[23]*px[i*13+ 7] +
                        dm[22]*px[i*13+ 6] + dm[0]*( px[i*13+ 4] + px[i*13+ 5]) + px[i*13+ 2];
         }
-		for ( i=0 ; i<n ; i++ ) 
+		for ( i=0 ; i<n ; i++ )
 			ret+=px[i*13];
 		ret/=(e_fp)n; /* feedback to make sure all loops get executed */
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nipred %d:",debug_counter++);
-	th_print_fp(ret);	
-#endif	
+	th_print_fp(ret);
+#endif
     }
 	return ret;
 }
@@ -1064,8 +1277,8 @@ e_fp difference_predictors(loops_params *p) {
         }
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\npred %d:",debug_counter++);
-	th_print_fp(px[0]);	
-#endif	
+	th_print_fp(px[0]);
+#endif
     }
 	return px[0];
 }
@@ -1096,8 +1309,8 @@ e_fp first_sum(loops_params *p) {
 		ret+=x[n-1];
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nsum %d:",debug_counter++);
-	th_print_fp(ret);	
-#endif	
+	th_print_fp(ret);
+#endif
     }
 	ret/=loop;
 	return ret;
@@ -1124,19 +1337,19 @@ e_fp first_dif(loops_params *p) {
             x[k]+= y[k+1] - y[k];
         }
     }
-	
+
 	return get_array_feedback(x,n);
 }
 
 e_fp pic_2d(loops_params *p) {
-	e_fp *y=p->v[0],  *z=p->v[1]; 
-	e_fp *p1r=p->v[2],  *p1i=p->v[3]; 
-	e_fp *p2r=p->v[4],  *p2i=p->v[5]; 
+	e_fp *y=p->v[0],  *z=p->v[1];
+	e_fp *p1r=p->v[2],  *p1i=p->v[3];
+	e_fp *p2r=p->v[4],  *p2i=p->v[5];
 	e_u32 *e=p->iv[0],  *f=p->iv[1];
 	e_fp *b=p->m2[1],  *c=p->m2[2],  *h=p->m2[3];
 	int n=p->N, loop=p->Loop,l,ip;
 	int i1=0,j1=0,i2=0,j2=0;
-	
+
 	if (p->m2size < 64*64) {
 		p->err="pic_2d bad size for matrix";
 		return FPCONST(0.0);
@@ -1181,7 +1394,7 @@ e_fp pic_2d(loops_params *p) {
 	reinit_vec(p,z,100);
 	reinit_ivec(p,e,100,1);
 	reinit_ivec(p,f,100,1);
-	
+
     for ( l=1 ; l<=loop ; l++ ) {
         for ( ip=0 ; ip<n ; ip++ ) {
             i1 = p1r[ip];
@@ -1204,8 +1417,8 @@ e_fp pic_2d(loops_params *p) {
         }
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\n2d %d:",debug_counter++);
-	th_print_fp(h[0]+p1r[0]+p1i[0]+p2r[0]+p2i[0]);	
-#endif	
+	th_print_fp(h[0]+p1r[0]+p1i[0]+p2r[0]+p2i[0]);
+#endif
     }
 	return h[0]+p1r[0]+p1i[0]+p2r[0]+p2i[0];
 }
@@ -1214,12 +1427,12 @@ int is_2px(int x)
     return (x & (x - 1)) == 0;
 }
 e_fp pic_1d(loops_params *p) {
-	e_fp *vx=p->v[0],  *xx=p->v[1]; 
-	e_fp *grd=p->v[2],  *xi=p->v[3]; 
-	e_fp *ex=p->v[4],  *ex1=p->v[5]; 
-	e_fp *dex=p->v[6],  *dex1=p->v[7]; 
+	e_fp *vx=p->v[0],  *xx=p->v[1];
+	e_fp *grd=p->v[2],  *xi=p->v[3];
+	e_fp *ex=p->v[4],  *ex1=p->v[5];
+	e_fp *dex=p->v[6],  *dex1=p->v[7];
 	e_fp *rx=p->v[8];
-	e_fp *rh=p->v[9]; 
+	e_fp *rh=p->v[9];
 	e_u32 *ix=p->iv[0],  *ir=p->iv[1]; /* temporary outputs */
 	e_fp dw,flx;
 	int n=p->N, loop=p->Loop;
@@ -1270,9 +1483,9 @@ e_fp pic_1d(loops_params *p) {
             xi[k] = (e_fp) ix[k];
             ex1[k] = ex[ ix[k] - 1 ];
             dex1[k] = dex[ ix[k] - 1 ];
-			/* add an epsilon to make sure this loop needs to be executed 
+			/* add an epsilon to make sure this loop needs to be executed
 			   each time through the outer loop */
-			grd[k]+=EE_EPSINI; 
+			grd[k]+=EE_EPSINI;
         }
         for ( k=0 ; k<n ; k++ ) {
             vx[k] += ex1[k] + ( xx[k] - xi[k] )*dex1[k];
@@ -1288,8 +1501,8 @@ e_fp pic_1d(loops_params *p) {
         }
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\n1d %d:",debug_counter++);
-	th_print_fp(rh[0]);	
-#endif	
+	th_print_fp(rh[0]);
+#endif
     }
 	return rh[0];
 }
@@ -1304,7 +1517,7 @@ e_fp casual(loops_params *p) {
 	int n=p->N, loop=p->Loop;
 	int j,k,l;
 	e_fp test=FPCONST(0.0);
-    
+
     /*
      *******************************************************************
      *   Kernel 15 -- Casual Fortran.  Development version
@@ -1423,7 +1636,7 @@ e_fp monte_carlo(loops_params *p) {
 	e_fp *tmps=p->v[3];
 	e_fp r,s,t;
 	e_u32 m;
-	
+
 	int n=p->N, loop=p->Loop;
 	int k,l;
 	int ret=0;
@@ -1529,10 +1742,10 @@ e_fp monte_carlo(loops_params *p) {
 }
 
 e_fp implicit(loops_params *p) {
-	e_fp *vxne=p->v[0],  *vxnd=p->v[1]; 
-	e_fp *vlr=p->v[2],  *vlin=p->v[3]; 
-	e_fp *vsp=p->v[4],  *vstp=p->v[5]; 
-	e_fp *ve3=p->v[6]; 
+	e_fp *vxne=p->v[0],  *vxnd=p->v[1];
+	e_fp *vlr=p->v[2],  *vlin=p->v[3];
+	e_fp *vsp=p->v[4],  *vstp=p->v[5];
+	e_fp *ve3=p->v[6];
     e_fp    start_scale = FPCONST(5.0) / FPCONST(3.0);
     e_fp    start_xnm = FPCONST(1.0) / FPCONST(3.0);
     e_fp    start_e6 = FPCONST(1.03) / FPCONST(3.07);
@@ -1578,7 +1791,7 @@ e_fp implicit(loops_params *p) {
 	 reinit_vec(p,vsp,n);
 	 reinit_vec(p,vstp,n);
 	 reinit_vec(p,vxne,n);
-	 
+
     for ( l=1 ; l<=loop ; l++ ) {
         int i = n-1;
         int j = 0;
@@ -1630,7 +1843,7 @@ e_fp hydro_2d(loops_params *p) {
 	e_fp t=0.0,s=0.0, ret=0.0;
 	int n=p->N, loop=p->Loop;
 	int j,k,l;
-    
+
     /*
      *******************************************************************
      *   Kernel 18 - 2-D explicit hydrodynamics fragment
@@ -1721,8 +1934,8 @@ e_fp hydro_2d(loops_params *p) {
 }
 
 e_fp lin_recurrence(loops_params *p) {
-	e_fp *sa=p->v[0],  *sb=p->v[1]; 
-	e_fp *b5=p->v[2]; 
+	e_fp *sa=p->v[0],  *sb=p->v[1];
+	e_fp *b5=p->v[2];
 	e_fp stb5;
 	int n=p->N, loop=p->Loop;
        /*
@@ -1759,19 +1972,19 @@ e_fp lin_recurrence(loops_params *p) {
         }
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nrec %d:",debug_counter++);
-	th_print_fp(stb5);	
-#endif	
+	th_print_fp(stb5);
+#endif
    }
 	return stb5;
 }
 
 e_fp ordinate_transport(loops_params *p) {
-	e_fp *y=p->v[0],  *g=p->v[3]; 
-	e_fp *u=p->v[1],  *v=p->v[4]; 
-	e_fp *w=p->v[2],  *z=p->v[5]; 
-	e_fp *xx=p->v[6]; 
-	e_fp *vx=p->v[7]; 
-	e_fp *x=p->v[8]; 
+	e_fp *y=p->v[0],  *g=p->v[3];
+	e_fp *u=p->v[1],  *v=p->v[4];
+	e_fp *w=p->v[2],  *z=p->v[5];
+	e_fp *xx=p->v[6];
+	e_fp *vx=p->v[7];
+	e_fp *x=p->v[8];
 	e_fp di,dn,dk;
 	e_fp	ret=0.0;
     /*
@@ -1790,14 +2003,14 @@ e_fp ordinate_transport(loops_params *p) {
 	int n=p->N, loop=p->Loop;
 	int l,k;
 	e_fp t,s;
-	reinit_vec(p,y,n); 
-	reinit_vec(p,g,n); 
-	reinit_ordinate_cvec(p,u,n); 
-	reinit_ordinate_cvec(p,vx,n); 
-	reinit_vec(p,v,n); 
-	reinit_ordinate_cvec(p,w,n); 
-	reinit_vec(p,z,n); 
-	reinit_vec(p,xx,3); 
+	reinit_vec(p,y,n);
+	reinit_vec(p,g,n);
+	reinit_ordinate_cvec(p,u,n);
+	reinit_ordinate_cvec(p,vx,n);
+	reinit_vec(p,v,n);
+	reinit_ordinate_cvec(p,w,n);
+	reinit_vec(p,z,n);
+	reinit_vec(p,xx,3);
 	t=xx[0];
 	s=xx[1];
 	dk=xx[2];
@@ -1817,8 +2030,8 @@ e_fp ordinate_transport(loops_params *p) {
 		ret+=xx[n-1]; /* return an output value dependent on each loop iteration */
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nord %d:",debug_counter++);
-	th_print_fp(ret);	
-#endif	
+	th_print_fp(ret);
+#endif
     }
 	return ret;
 }
@@ -1846,6 +2059,21 @@ e_fp matmul(loops_params *p) {
      */
 	/*SG: Add dependency on outer loop to CX so compiler cannot optimize it away to a multiply on the final result. */
     for ( l=1 ; l<=loop ; l++ ) {
+#if USE_RVV
+      for (j=0; j<n; j++) {
+        for (i=0; i<25; ) {
+          size_t vl = __riscv_vsetvl_e32m8(25-i);
+          vfloat32m8_t pxs = __riscv_vle32_v_f32m8(&px[j*25+i], vl);
+          for (k=0; k<25; k++) {
+            float cxs = cx[j*25+k+l];
+            vfloat32m8_t pys = __riscv_vle32_v_f32m8(&vy[k*n+i], vl);
+            pxs = __riscv_vfmacc_vf_f32m8(pxs, cxs, pys, vl);
+          }
+          __riscv_vse32_v_f32m8(&px[j*25+i], pxs, vl);
+          i += vl;
+        }
+      }
+#else
         for ( k=0 ; k<25 ; k++ ) {
             for ( i=0 ; i<25 ; i++ ) {
                 for ( j=0 ; j<n ; j++ ) {
@@ -1853,15 +2081,16 @@ e_fp matmul(loops_params *p) {
                 }
             }
         }
+#endif
     }
 	ret=get_array_feedback(px,n*25);
 	return ret;
 }
 
 e_fp planckian(loops_params *p) {
-	e_fp *y=p->v[0]; 
-	e_fp *u=p->v[1],  *v=p->v[3]; 
-	e_fp *w=p->v[2],  *x=p->v[4]; 
+	e_fp *y=p->v[0];
+	e_fp *u=p->v[1],  *v=p->v[3];
+	e_fp *w=p->v[2],  *x=p->v[4];
 	e_fp	ret=FPCONST(0.0);
 	int n=p->N, loop=p->Loop,l,k;
     e_fp expmax = FPCONST(20.0);
@@ -1878,9 +2107,9 @@ e_fp planckian(loops_params *p) {
      * 22 CONTINUE
      */
 
-	reinit_vec(p,u,n); 
-	reinit_vec(p,x,n); 
-	reinit_vec(p,v,n); 
+	reinit_vec(p,u,n);
+	reinit_vec(p,x,n);
+	reinit_vec(p,v,n);
     u[n-1] = FPCONST(0.99)*expmax*v[n-1];
     for ( l=1 ; l<=loop ; l++ ) {
 		reinit_vec(p,v,n); /* must reinit otherwise compiler will only exec last loop */
@@ -1935,10 +2164,10 @@ e_fp hydro_2d_implicit(loops_params *p) {
     }
 	ret=get_array_feedback(za,n); /* return a value that depends on each compute in the loop */
 	return ret;
-}	
+}
 
 e_fp firstmin(loops_params *p) {
-	e_fp *x=p->v[0]; 
+	e_fp *x=p->v[0];
 	int	ret=0;
 	int n=p->N, loop=p->Loop;
 	int l,k,m;
