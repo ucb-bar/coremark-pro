@@ -170,47 +170,7 @@ Please refer to LICENSE.md for the specific license agreement that pertains to t
 #define FIX_3_072711026  FIX(3.072711026)
 #endif
 
-
-/* Multiply an e_s32 variable by an e_s32 constant to yield an e_s32 result.
- * For 8-bit samples with the recommended scaling, all the variable
- * and constant values involved are no more than 16 bits wide, so a
- * 16x16->32 bit multiply can be used instead of a full 32x32 multiply.
- * For 12-bit samples, a full 32-bit multiplication will be needed.
- */
-
-#if BITS_IN_JSAMPLE == 8
-#define MULTIPLY(var,constant)  MULTIPLY16C16(var,constant)
-#else
-#define MULTIPLY(var,constant)  ((var) * (constant))
-#endif
-
-
-/*
- * Perform the forward DCT on one block of samples.
- */
-
-GLOBAL(void)
-jpeg_fdct_islow (DCTELEM * data)
-{
-  e_s32 tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
-  e_s32 tmp10, tmp11, tmp12, tmp13;
-  e_s32 z1, z2, z3, z4, z5;
-  DCTELEM *dataptr;
-  int ctr;
-  SHIFT_TEMPS
-
 #if USE_RVV
-  /* Pass 1: process rows. */
-  /* Note results are scaled up by sqrt(8) compared to a true DCT; */
-  /* furthermore, we scale the results by 2**PASS1_BITS. */
-  /* DCTELEM * rvv_out = malloc(sizeof(DCTELEM) * DCTSIZE2); */
-  /* memcpy(rvv_out, data, sizeof(DCTELEM) * DCTSIZE2); */
-  /* dataptr = rvv_out; */
-  dataptr = data;
-
-  for (ctr = 0; ctr < DCTSIZE;) {
-    size_t vl;
-
 #define IN0 "v0"
 #define IN1 "v1"
 #define IN2 "v2"
@@ -261,6 +221,49 @@ jpeg_fdct_islow (DCTELEM * data)
     VADD_VX(vr, vr, ONE << (n-1));                \
     VSRA_VI(vr, vr, n);                           \
 
+#endif
+
+
+
+/* Multiply an e_s32 variable by an e_s32 constant to yield an e_s32 result.
+ * For 8-bit samples with the recommended scaling, all the variable
+ * and constant values involved are no more than 16 bits wide, so a
+ * 16x16->32 bit multiply can be used instead of a full 32x32 multiply.
+ * For 12-bit samples, a full 32-bit multiplication will be needed.
+ */
+
+#if BITS_IN_JSAMPLE == 8
+#define MULTIPLY(var,constant)  MULTIPLY16C16(var,constant)
+#else
+#define MULTIPLY(var,constant)  ((var) * (constant))
+#endif
+
+
+/*
+ * Perform the forward DCT on one block of samples.
+ */
+
+GLOBAL(void)
+jpeg_fdct_islow (DCTELEM * data)
+{
+  e_s32 tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7;
+  e_s32 tmp10, tmp11, tmp12, tmp13;
+  e_s32 z1, z2, z3, z4, z5;
+  DCTELEM *dataptr;
+  int ctr;
+  SHIFT_TEMPS
+
+#if USE_RVV
+  /* Pass 1: process rows. */
+  /* Note results are scaled up by sqrt(8) compared to a true DCT; */
+  /* furthermore, we scale the results by 2**PASS1_BITS. */
+  /* DCTELEM * rvv_out = malloc(sizeof(DCTELEM) * DCTSIZE2); */
+  /* memcpy(rvv_out, data, sizeof(DCTELEM) * DCTSIZE2); */
+  /* dataptr = rvv_out; */
+  dataptr = data;
+
+  for (ctr = 0; ctr < DCTSIZE;) {
+    size_t vl;
     __asm__ volatile("vsetvli %0, %1, e32, m1, ta, ma" : "=r"(vl) : "r"(DCTSIZE));
     __asm__ volatile("vlseg8e32.v v0, (%0)" : : "r"(&dataptr[ctr * DCTSIZE]));
     VADD_VV(TMP0, IN0, IN7);
@@ -401,6 +404,98 @@ jpeg_fdct_islow (DCTELEM * data)
   }
 #endif
 
+#if USE_RVV
+  dataptr = data;
+  for (ctr = 0; ctr < DCTSIZE; ) {
+    size_t vl;
+    __asm__ volatile("vsetvli %0, %1, e32, m1, ta, ma" : "=r"(vl) : "r"(DCTSIZE));
+    __asm__ volatile("vle32.v v0, (%0)" : : "r"(&dataptr[DCTSIZE * 0 + ctr]));
+    __asm__ volatile("vle32.v v1, (%0)" : : "r"(&dataptr[DCTSIZE * 1 + ctr]));
+    __asm__ volatile("vle32.v v2, (%0)" : : "r"(&dataptr[DCTSIZE * 2 + ctr]));
+    __asm__ volatile("vle32.v v3, (%0)" : : "r"(&dataptr[DCTSIZE * 3 + ctr]));
+    __asm__ volatile("vle32.v v4, (%0)" : : "r"(&dataptr[DCTSIZE * 4 + ctr]));
+    __asm__ volatile("vle32.v v5, (%0)" : : "r"(&dataptr[DCTSIZE * 5 + ctr]));
+    __asm__ volatile("vle32.v v6, (%0)" : : "r"(&dataptr[DCTSIZE * 6 + ctr]));
+    __asm__ volatile("vle32.v v7, (%0)" : : "r"(&dataptr[DCTSIZE * 7 + ctr]));
+
+    VADD_VV(TMP0, IN0, IN7);
+    VSUB_VV(TMP7, IN0, IN7);
+    VADD_VV(TMP1, IN1, IN6);
+    VSUB_VV(TMP6, IN1, IN6);
+    VADD_VV(TMP2, IN2, IN5);
+    VSUB_VV(TMP5, IN2, IN5);
+    VADD_VV(TMP3, IN3, IN4);
+    VSUB_VV(TMP4, IN3, IN4);
+
+    VADD_VV(TMP10, TMP0, TMP3);
+    VSUB_VV(TMP13, TMP0, TMP3);
+    VADD_VV(TMP11, TMP1, TMP2);
+    VSUB_VV(TMP12, TMP1, TMP2);
+
+    VADD_VV(OUT0, TMP10, TMP11);
+    V_DESCALE(OUT0, PASS1_BITS);
+    VSUB_VV(OUT4, TMP10, TMP11);
+    V_DESCALE(OUT4, PASS1_BITS);
+
+    VADD_VV(Z1, TMP12, TMP13);
+    VMUL_VX(Z1, Z1, FIX_0_541196100);
+
+    VMUL_VX(OUT2, TMP13, FIX_0_765366865);
+    VADD_VV(OUT2, OUT2, Z1);
+    V_DESCALE(OUT2, CONST_BITS+PASS1_BITS);
+
+    VMUL_VX(OUT6, TMP12, - FIX_1_847759065);
+    VADD_VV(OUT6, OUT6, Z1);
+    V_DESCALE(OUT6, CONST_BITS+PASS1_BITS);
+
+    VADD_VV(Z1, TMP4, TMP7);
+    VADD_VV(Z2, TMP5, TMP6);
+    VADD_VV(Z3, TMP4, TMP6);
+    VADD_VV(Z4, TMP5, TMP7);
+
+    VADD_VV(Z5, Z3, Z4);
+    VMUL_VX(Z5, Z5, FIX_1_175875602);
+
+    VMUL_VX(TMP4, TMP4, FIX_0_298631336);
+    VMUL_VX(TMP5, TMP5, FIX_2_053119869);
+    VMUL_VX(TMP6, TMP6, FIX_3_072711026);
+    VMUL_VX(TMP7, TMP7, FIX_1_501321110);
+
+    VMUL_VX(Z1, Z1, - FIX_0_899976223);
+    VMUL_VX(Z2, Z2, - FIX_2_562915447);
+    VMUL_VX(Z3, Z3, - FIX_1_961570560);
+    VMUL_VX(Z4, Z4, - FIX_0_390180644);
+
+    VADD_VV(Z3, Z3, Z5);
+    VADD_VV(Z4, Z4, Z5);
+
+    VADD_VV(OUT7, TMP4, Z1);
+    VADD_VV(OUT7, OUT7, Z3);
+    V_DESCALE(OUT7, CONST_BITS+PASS1_BITS);
+
+    VADD_VV(OUT5, TMP5, Z2);
+    VADD_VV(OUT5, OUT5, Z4);
+    V_DESCALE(OUT5, CONST_BITS+PASS1_BITS);
+
+    VADD_VV(OUT3, TMP6, Z2);
+    VADD_VV(OUT3, OUT3, Z3);
+    V_DESCALE(OUT3, CONST_BITS+PASS1_BITS);
+
+    VADD_VV(OUT1, TMP7, Z1);
+    VADD_VV(OUT1, OUT1, Z4);
+    V_DESCALE(OUT1, CONST_BITS+PASS1_BITS);
+
+    __asm__ volatile("vse32.v v24, (%0)" : :"r"(&dataptr[DCTSIZE * 0 + ctr]));
+    __asm__ volatile("vse32.v v25, (%0)" : :"r"(&dataptr[DCTSIZE * 1 + ctr]));
+    __asm__ volatile("vse32.v v26, (%0)" : :"r"(&dataptr[DCTSIZE * 2 + ctr]));
+    __asm__ volatile("vse32.v v27, (%0)" : :"r"(&dataptr[DCTSIZE * 3 + ctr]));
+    __asm__ volatile("vse32.v v28, (%0)" : :"r"(&dataptr[DCTSIZE * 4 + ctr]));
+    __asm__ volatile("vse32.v v29, (%0)" : :"r"(&dataptr[DCTSIZE * 5 + ctr]));
+    __asm__ volatile("vse32.v v30, (%0)" : :"r"(&dataptr[DCTSIZE * 6 + ctr]));
+    __asm__ volatile("vse32.v v31, (%0)" : :"r"(&dataptr[DCTSIZE * 7 + ctr]));
+    ctr += vl;
+  }
+#else
   /* Pass 2: process columns.
    * We remove the PASS1_BITS scaling, but leave the results scaled up
    * by an overall factor of 8.
@@ -469,6 +564,8 @@ jpeg_fdct_islow (DCTELEM * data)
 
     dataptr++;            /* advance pointer to next column */
   }
+#endif
+
 }
 
 #endif /* DCT_ISLOW_SUPPORTED */
