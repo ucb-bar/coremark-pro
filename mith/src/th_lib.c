@@ -1216,7 +1216,11 @@ void *th_memcpy(void *s1, const void *s2, size_t n) {
 	implementation for this function.
 */
 void *th_memmove(void *s1, const void *s2, size_t n) {
-	return memmove(s1,s2,n);
+#if USE_RVV
+  return vec_memmove(s1, s2, n);
+#else
+  return memmove(s1,s2,n);
+#endif
 }
 /* Function: th_memset
 	Description:

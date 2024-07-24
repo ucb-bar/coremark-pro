@@ -226,9 +226,18 @@ void reinit_ivec_sparse(loops_params *params, e_u32 *p, int nvals, e_u32 mask, i
 }
 void reinit_vec_const(loops_params *params, e_fp *p, int nvals, e_fp val) {
 	int i;
-
+#if USE_RVV
+        size_t vl =__riscv_vsetvl_e32m8(nvals);
+        vfloat32m8_t r = __riscv_vfmv_v_f_f32m8(val, vl);
+        for (i=0 ; i<nvals; ) {
+          vl = __riscv_vsetvl_e32m8(nvals - i);
+          __riscv_vse32_v_f32m8(&p[i], r, vl);
+          i += vl;
+        }
+#else
 	for (i=0 ; i<nvals; i++)
 		p[i]=val;
+#endif
 }
 void zero_vec( e_fp *p, int nvals)
 {
@@ -423,7 +432,11 @@ void reset_all_data(loops_params *p) {
 	int i;
 	for (i=0; i<num_vectors; i++) {
 		zero_vec(p->v[i],p->vsize);
+#if USE_RVV
+                vec_memset(p->iv[i],0,p->ivsize);
+#else
 		th_memset(p->iv[i],0,p->ivsize);
+#endif
 	}
 	for (i=0; i<num_2d_matrixes; i++) {
 		zero_vec(p->m2[i],p->m2size);
@@ -933,13 +946,13 @@ e_fp state_fragment(loops_params *p) {
 	 *	SG: Had to modify since outer loop only had to execute once if compiler is smart enough
      */
     for ( l=1 ; l<=loop ; l++ ) {
-		reinit_vec(p,u,n+6);
-        for ( k=0 ; k<n ; k++ ) {
-            x[k] = u[k] + r*( z[k] + r*y[k] ) +
-                   t*( u[k+3] + r*( u[k+2] + r*u[k+1] ) +
-                      t*( u[k+6] + r*( u[k+5] + r*u[k+4] ) ) );
-        }
-		ret+=get_array_feedback(x,n);
+      reinit_vec(p,u,n+6);
+      for ( k=0 ; k<n ; k++ ) {
+	x[k] = u[k] + r*( z[k] + r*y[k] ) +
+	  t*( u[k+3] + r*( u[k+2] + r*u[k+1] ) +
+	      t*( u[k+6] + r*( u[k+5] + r*u[k+4] ) ) );
+      }
+      ret+=get_array_feedback(x,n);
     }
 
 	return ret;
@@ -1413,25 +1426,91 @@ e_fp pic_2d(loops_params *p) {
 	reinit_ivec(p,f,100,1);
 
     for ( l=1 ; l<=loop ; l++ ) {
-        for ( ip=0 ; ip<n ; ip++ ) {
-            i1 = p1r[ip];
-            j1 = p1i[ip];
-            i1 &= 0x03f;
-            j1 &= 0x03f;
-            p2r[ip] += b[j1*64+i1];
-            p2i[ip] += c[j1*64+i1];
-            p1r[ip] += p2r[ip];
-            p1i[ip] += p2i[ip];
-            i2 = p1r[ip];
-            j2 = p1i[ip];
-            i2 &=0x03f;
-            j2 &=0x03f;
-            p1r[ip] += y[i2+32];
-            p1i[ip] += z[j2+32];
-            i2 += e[i2+32];
-            j2 += f[j2+32];
-            h[j2*64+i2] += 1.0;
+#if USE_RVV
+      for ( ip=0 ; ip<n ; ) {
+        size_t vl = __riscv_vsetvl_e32m2(n - ip);
+        vfloat32m2_t p1rs = __riscv_vle32_v_f32m2(&p1r[ip], vl);
+        vfloat32m2_t p1is = __riscv_vle32_v_f32m2(&p1i[ip], vl);
+        vint32m2_t i1s = __riscv_vfcvt_rtz_x_f_v_i32m2(p1rs, vl);
+        vint32m2_t j1s = __riscv_vfcvt_rtz_x_f_v_i32m2(p1is, vl);
+
+        i1s = __riscv_vand_vx_i32m2(i1s, 0x03f, vl);
+        j1s = __riscv_vand_vx_i32m2(i1s, 0x03f, vl);
+
+        vint32m2_t bcidxs = __riscv_vsll_vx_i32m2(j1s, 6, vl);
+        bcidxs = __riscv_vadd_vv_i32m2(bcidxs, i1s, vl);
+        bcidxs = __riscv_vsll_vx_i32m2(bcidxs, 2, vl);
+        vuint64m4_t bcidxs64 = __riscv_vreinterpret_v_i64m4_u64m4(__riscv_vsext_vf2_i64m4(bcidxs, vl));
+
+        vfloat32m2_t bs = __riscv_vluxei64_v_f32m2(b, bcidxs64, vl);
+        vfloat32m2_t cs = __riscv_vluxei64_v_f32m2(c, bcidxs64, vl);
+        vfloat32m2_t p2rs = __riscv_vle32_v_f32m2(&p2r[ip], vl);
+        vfloat32m2_t p2is = __riscv_vle32_v_f32m2(&p2i[ip], vl);
+        p2rs = __riscv_vfadd_vv_f32m2(p2rs, bs, vl);
+        p2is = __riscv_vfadd_vv_f32m2(p2is, cs, vl);
+        p1rs = __riscv_vfadd_vv_f32m2(p2rs, p1rs, vl);
+        p1is = __riscv_vfadd_vv_f32m2(p2is, p1is, vl);
+
+        vint32m2_t i2s = __riscv_vfcvt_rtz_x_f_v_i32m2(p1rs, vl);
+        vint32m2_t j2s = __riscv_vfcvt_rtz_x_f_v_i32m2(p1is, vl);
+
+        i2s = __riscv_vand_vx_i32m2(i2s, 0x03f, vl);
+        j2s = __riscv_vand_vx_i32m2(i2s, 0x03f, vl);
+
+        vint32m2_t yeidxs = __riscv_vadd_vx_i32m2(i2s, 32, vl);
+        yeidxs = __riscv_vsll_vx_i32m2(i2s, 2, vl);
+        vuint64m4_t yeidxs64 = __riscv_vreinterpret_v_i64m4_u64m4(__riscv_vsext_vf2_i64m4(yeidxs, vl));
+        vint32m2_t zfidxs = __riscv_vadd_vx_i32m2(j2s, 32, vl);
+        zfidxs = __riscv_vsll_vx_i32m2(j2s, 2, vl);
+        vuint64m4_t zfidxs64 = __riscv_vreinterpret_v_i64m4_u64m4(__riscv_vsext_vf2_i64m4(zfidxs, vl));
+
+        vfloat32m2_t ys = __riscv_vluxei64_v_f32m2(y, yeidxs64, vl);
+        vuint32m2_t es = __riscv_vluxei64_v_u32m2(e, yeidxs64, vl);
+        vfloat32m2_t zs = __riscv_vluxei64_v_f32m2(z, zfidxs64, vl);
+        vuint32m2_t fs = __riscv_vluxei64_v_u32m2(f, zfidxs64, vl);
+        p1rs = __riscv_vfadd_vv_f32m2(p1rs, ys, vl);
+        p1is = __riscv_vfadd_vv_f32m2(p1is, zs, vl);
+
+        __riscv_vse32_v_f32m2(&p2r[ip], p2rs, vl);
+        __riscv_vse32_v_f32m2(&p2i[ip], p2is, vl);
+        __riscv_vse32_v_f32m2(&p1r[ip], p1rs, vl);
+        __riscv_vse32_v_f32m2(&p1i[ip], p1is, vl);
+
+        i2s = __riscv_vadd_vv_i32m2(i2s, __riscv_vreinterpret_v_u32m2_i32m2(es), vl);
+        j2s = __riscv_vadd_vv_i32m2(j2s, __riscv_vreinterpret_v_u32m2_i32m2(fs), vl);
+
+        vint32m2_t hidxs = __riscv_vsll_vx_i32m2(j2s, 6, vl);
+        hidxs = __riscv_vadd_vv_i32m2(hidxs, i2s, vl);
+
+        for (size_t j = 0; j < vl; j++) {
+          int32_t idx = __riscv_vmv_x_s_i32m2_i32(hidxs);
+          hidxs = __riscv_vslide1down_vx_i32m2(hidxs, 0, vl);
+          h[idx] += 1.0;
         }
+        ip += vl;
+      }
+
+#else
+      for ( ip=0 ; ip<n ; ip++ ) {
+        i1 = p1r[ip];
+        j1 = p1i[ip];
+        i1 &= 0x03f;
+        j1 &= 0x03f;
+        p2r[ip] += b[j1*64+i1];
+        p2i[ip] += c[j1*64+i1];
+        p1r[ip] += p2r[ip];
+        p1i[ip] += p2i[ip];
+        i2 = p1r[ip];
+        j2 = p1i[ip];
+        i2 &=0x03f;
+        j2 &=0x03f;
+        p1r[ip] += y[i2+32];
+        p1i[ip] += z[j2+32];
+        i2 += e[i2+32];
+        j2 += f[j2+32];
+        h[j2*64+i2] += 1.0;
+      }
+#endif
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\n2d %d:",debug_counter++);
 	th_print_fp(h[0]+p1r[0]+p1i[0]+p2r[0]+p2i[0]);

@@ -22,3 +22,11 @@ void* vec_memset(void *s, int c, size_t n) {
   }
   return s;
 }
+
+void* vec_memmove(void *s1, const void *s2, size_t n) {
+  if (s2 < s1 && ((s1 - s2) < n)) {
+    return memmove(s1, s2, n);
+  } else {
+    return vec_memcpy(s1, s2, n);
+  }
+}
