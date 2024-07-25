@@ -789,15 +789,34 @@ e_fp inner_product(loops_params *p) {
 	 *
 	 *	SG : original code only had to perform one loop. Moved q initialization out of loop.
      */
-
     for ( l=1 ; l<=loop ; l++ ) {
+        #if USE_RVV
+        // Directly track current addresses
+        e_fp* z_step = z+l, x_step = x;
+        __asm__ volatile ("vfmv.s.f v2, %0" : : "f"(q));
+        // k is number of remaining elements
+        // Don't need k to generate exact addresses due to unit-stride
+        while(k=n; k>0; k-=vl) {
+            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
+            __asm__ volatile ("vle64.v v16, (%0)" : : "r"(z_step));
+            __asm__ volatile ("vle64.v v24, (%0)" : : "r"(x_step));
+            __asm__ volatile ("vfmul.vv v8, v16, v24");
+            // Operations must be in-order for exact replication, so must reduce in loop
+            __asm__ volatile ("vfredosum.vs v2, v8, v2");
+            z_step+=vl, x_step+=vl;
+        }
+        __asm__ ("vfmv.f.s %0, v2" : "=f" (q));
+
+        #else
         for ( k=0 ; k<n ; k++ ) {
             q += z[k+l]*x[k];
         }
-#if (BMDEBUG && DEBUG_ACCURATE_BITS)
-	th_printf("\niprod %d:",debug_counter++);
-	th_print_fp(q);
-#endif
+        #endif
+
+        #if (BMDEBUG && DEBUG_ACCURATE_BITS)
+	    th_printf("\niprod %d:",debug_counter++);
+	    th_print_fp(q);
+        #endif
     }
 	return q;
 }
