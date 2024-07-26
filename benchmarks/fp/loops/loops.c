@@ -713,9 +713,27 @@ e_fp hydro_fragment(loops_params *p) {
 
     for ( l=1 ; l<=loop ; l++ ) {
 		reinit_vec(p,z,n+11); /* force multiple iterations with new data for each iteration */
+        #if USE_RVV
+        // Naive implementation: adds to calculate address, loads k+10 and k+11 separately, no static optimization
+        uint32_t vl;
+        // k is number of remaining elements
+        // Don't need k to generate exact addresses due to unit-stride
+        for (k=0 ; k<n ; k+=vl) {
+            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
+            __asm__ volatile ("vle64.v v16, (%0)" : : "r"(z+k+10)); //z[k+10]
+            __asm__ volatile ("vfmul.vf v8, v16, %0" : : : "f"(r)); //r*
+            __asm__ volatile ("vle64.v v24, (%0)" : : "r"(z+k+11)); //z[k+11]
+            __asm__ volatile ("vfmacc.vf v8, v24, %" : : : "f"(t)); //+t*
+            __asm__ volatile ("vle64.v v0, (%0)" : : "r"(y+k));     //y[k]
+            __asm__ volatile ("vfmul.vv v16, v8, v0");              //y*()
+            __asm__ volatile ("vfadd.vf v24, v16, %0" : : : "f"(q)) //q+
+            __asm__ volatile ("vse64.v v0, (%0)" : : "r"(x+k));     //x[k]=
+        }
+        #else
         for ( k=0 ; k<n ; k++ ) {
             x[k] = q + y[k]*( r*z[k+10] + t*z[k+11] );
         }
+        #endif
 		ret+=get_array_feedback(x,n); /* force the calculation */
     }
 
@@ -793,10 +811,11 @@ e_fp inner_product(loops_params *p) {
         #if USE_RVV
         // Directly track current addresses
         e_fp* z_step = z+l, x_step = x;
+        uint32_t vl;
         __asm__ volatile ("vfmv.s.f v2, %0" : : "f"(q));
         // k is number of remaining elements
         // Don't need k to generate exact addresses due to unit-stride
-        while(k=n; k>0; k-=vl) {
+        for (k=n; k>0; k-=vl) {
             __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
             __asm__ volatile ("vle64.v v16, (%0)" : : "r"(z_step));
             __asm__ volatile ("vle64.v v24, (%0)" : : "r"(x_step));
