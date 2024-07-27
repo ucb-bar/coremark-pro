@@ -719,15 +719,15 @@ e_fp hydro_fragment(loops_params *p) {
         // k is number of remaining elements
         // Don't need k to generate exact addresses due to unit-stride
         for (k=0 ; k<n ; k+=vl) {
-            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
-            __asm__ volatile ("vle64.v v16, (%0)" : : "r"(z+k+10)); //z[k+10]
+            __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
+            __asm__ volatile ("vle32.v v16, (%0)" : : "r"(z+k+10)); //z[k+10]
             __asm__ volatile ("vfmul.vf v8, v16, %0" : : : "f"(r)); //r*
-            __asm__ volatile ("vle64.v v24, (%0)" : : "r"(z+k+11)); //z[k+11]
+            __asm__ volatile ("vle32.v v24, (%0)" : : "r"(z+k+11)); //z[k+11]
             __asm__ volatile ("vfmacc.vf v8, v24, %" : : : "f"(t)); //+t*
-            __asm__ volatile ("vle64.v v0, (%0)" : : "r"(y+k));     //y[k]
+            __asm__ volatile ("vle32.v v0, (%0)" : : "r"(y+k));     //y[k]
             __asm__ volatile ("vfmul.vv v16, v8, v0");              //y*()
             __asm__ volatile ("vfadd.vf v24, v16, %0" : : : "f"(q)) //q+
-            __asm__ volatile ("vse64.v v0, (%0)" : : "r"(x+k));     //x[k]=
+            __asm__ volatile ("vse32.v v0, (%0)" : : "r"(x+k));     //x[k]=
         }
         #else
         for ( k=0 ; k<n ; k++ ) {
@@ -774,10 +774,34 @@ e_fp cholesky(loops_params *p) {
             ipntp += ii;
             ii /= 2;
             i = ipntp - 1;
+            #if USE_RVV
+            // Could shift ii, but calculating ipntp requires many additions
+            // ipntp-ipntp varies in length, so iterating over inner loop wastes less
+            e_fp x_out = x+i;
+            uint32_t vl = 1;
+            for (k=ipnt+1; k<ipntp; k= k+(vl<<1)) {
+                x_out += vl;
+                __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
+
+                __asm__ volatile ("vle32.v v0, (%0)" : : "r"(v+k));    //v[k]
+                __asm__ volatile ("vle32.v v8, (%0)" : : "r"(x+k-1));  //x[k-1]
+                __asm__ volatile ("vle32.v v16, (%0)" : : "r"(x+k));   //x[k]
+                __asm__ volatile ("vfnmsac.vv v16, v0, v8");           //x[k]-v[k]*x[k-1]
+
+                // Doesn't use shift on repeated array accesses
+                // Loads will most likely be cached
+                __asm__ volatile ("vle32.v v24, (%0)" : : "r"(x+k+1)); //x[k+1]
+                __asm__ volatile ("vle32.v v8, (%0)" : : "r"(v+k+1));  //v[k+1]
+                __asm__ volatile ("vfnmsac.vv v16, v8, v24");          //-v[k+1]*x[k+1]
+                __asm__ volatile ("vse32.v v16, (%0)" : : "r"(x_out)); //x[i]=
+            }
+
+            #else
             for ( k=ipnt+1 ; k<ipntp ; k=k+2 ) {
                 i++;
                 x[i] = x[k] - v[k  ]*x[k-1] - v[k+1]*x[k+1];
             }
+            #endif
         } while ( ii>0 );
     }
 	if (p->full_verify)
@@ -812,11 +836,12 @@ e_fp inner_product(loops_params *p) {
         // Directly track current addresses
         e_fp* z_step = z+l, x_step = x;
         uint32_t vl;
+        __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
         __asm__ volatile ("vfmv.s.f v2, %0" : : "f"(q));
         // k is number of remaining elements
         // Don't need k to generate exact addresses due to unit-stride
         for (k=n; k>0; k-=vl) {
-            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
+            __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
             __asm__ volatile ("vle64.v v16, (%0)" : : "r"(z_step));
             __asm__ volatile ("vle64.v v24, (%0)" : : "r"(x_step));
             __asm__ volatile ("vfmul.vv v8, v16, v24");
