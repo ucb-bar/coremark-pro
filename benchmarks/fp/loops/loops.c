@@ -719,7 +719,7 @@ e_fp hydro_fragment(loops_params *p) {
         // k is number of remaining elements
         // Don't need k to generate exact addresses due to unit-stride
         for (k=0 ; k<n ; k+=vl) {
-            __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
+            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
             __asm__ volatile ("vle32.v v16, (%0)" : : "r"(z+k+10)); //z[k+10]
             __asm__ volatile ("vfmul.vf v8, v16, %0" : : : "f"(r)); //r*
             __asm__ volatile ("vle32.v v24, (%0)" : : "r"(z+k+11)); //z[k+11]
@@ -781,7 +781,7 @@ e_fp cholesky(loops_params *p) {
             uint32_t vl = 1;
             for (k=ipnt+1; k<ipntp; k= k+(vl<<1)) {
                 x_out += vl;
-                __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
+                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
 
                 __asm__ volatile ("vle32.v v0, (%0)" : : "r"(v+k));    //v[k]
                 __asm__ volatile ("vle32.v v8, (%0)" : : "r"(x+k-1));  //x[k-1]
@@ -836,12 +836,12 @@ e_fp inner_product(loops_params *p) {
         // Directly track current addresses
         e_fp* z_step = z+l, x_step = x;
         uint32_t vl;
-        __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
+        __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
         __asm__ volatile ("vfmv.s.f v2, %0" : : "f"(q));
         // k is number of remaining elements
         // Don't need k to generate exact addresses due to unit-stride
         for (k=n; k>0; k-=vl) {
-            __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
+            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
             __asm__ volatile ("vle32.v v16, (%0)" : : "r"(z_step));
             __asm__ volatile ("vle32.v v24, (%0)" : : "r"(x_step));
             __asm__ volatile ("vfmul.vv v8, v16, v24");
@@ -964,16 +964,60 @@ e_fp linear_recurrence(loops_params *p) {
      *        W(i)= W(i)  + B(i,k) * W(i-k)
      *  6 CONTINUE
      */
-
     for ( i=0 ; i<n ; i++ ) {
 		w[i]=FPCONST(0.0100);
 	}
     for ( l=1 ; l<=loop ; l++ ) {
         for ( i=1 ; i<n ; i++ ) {
+            #if USE_RVV
+            //FIXME: This code was ported incorrectly and is missing the += to add
+            // W(i) to itself in the inner loop instead of repeatedly reassigning it.
+            // Once the output checks are updated, vectorizing the inner loop will be more efficient.
+            w[i] = b[(i-1)*n+i] * w[0];
+			if (!th_isfinite(w[i])) w[i]=b[(i-1)*n+i]; /* avoid potential inf */
+
+            /**/
+            // Cannot vectorize over i because each step uses all previous w[i]
+            // Instead, vectorize over k to perform sum of products
+            e_fp* bstart = b+i, wstart = w+i-1;
+            e_fp sum;
+            const int bstride = n*(32>>3), wstride = -(32>>3); // Strides for k*n, -k (in bytes) as k increments
+            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(1));
+            __asm__ volatile("vmv.s.x v7, %0" : : "=r"(w[i]));
+            for (k=0; k<i; k+=vl) {
+                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(i-vl));
+                // Multiply inputs from b and w
+                __asm__ volatile("vlse32.v v8, (%0), %1" : : "r"(b+i) :"r"(bstride)); //b[k*n+i]
+                __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(w) :"r"(wstride)); //w[(i-k)-1]
+                __asm__ volatile("vfmul.vv v24, v16, v8");
+
+                // Vector isfinite: Check that output is a number
+                // ASSUMPTION: !isfinite reassignment is meant to reassign the addend, not the sum
+                __asm__ volatile("vfclass.v v16, v24");
+                // RISCV Convention denotes negative normal, -0, +0, and positive normal
+                //  with bits 1,3,4,6 of classify's output. If any are 1, the number is finite.
+                // isfinite considers subnormal numbers to be invalid, so this does as well
+                __asm__ volatile("vand.vx v16, v16, %0" : : : "r"(0b1011010)); 
+                // For all non-finite elements (has 0 in v16), overwrite with b[k*n+i]
+                __asm__ volatile("vmseq.vi v0, v16, 0");
+                __asm__ volatile("vmv.v.v v16, v8, v0.t");
+
+                // Sum
+                __asm__ volatile("vfredosum.vs v7, v16, v7");
+                
+                wstart -= vl;
+                bstart += vl*k;
+            }
+            // Set w[i] to final result
+            __asm__ volatile("vmv.x.s %0, v7" : "=r"(sum));
+            w[i] = sum;
+
+            #else
             for ( k=0 ; k<i ; k++ ) {
                 w[i] = b[k*n+i] * w[(i-k)-1];
 				if (!th_isfinite(w[i])) w[i]=b[k*n+i]; /* avoid potential inf */
             }
+            #endif
         }
 		w[0]=b[k*n] * w[n-1];
     }
@@ -1014,7 +1058,7 @@ e_fp state_fragment(loops_params *p) {
       uint32_t vl;
       float u1, u2, u3;
       for (k=0; k<n; k+=vl) {
-        __asm__ volatile ("vsetvli %1, %0, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
+        __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
 
         // u[k] + r*( z[k] + r*y[k] )
         __asm__ volatile ("vle32.v v0, (%0)" : : "r"(y+k)); //y[k]
