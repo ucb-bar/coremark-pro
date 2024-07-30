@@ -973,45 +973,44 @@ e_fp linear_recurrence(loops_params *p) {
             //FIXME: This code was ported incorrectly and is missing the += to add
             // W(i) to itself in the inner loop instead of repeatedly reassigning it.
             // Once the output checks are updated, vectorizing the inner loop will be more efficient.
-            w[i] = b[(i-1)*n+i] * w[0];
+            // If !isfinite check changed, also fix sum loop.
+            /*w[i] = b[(i-1)*n+i] * w[0];
 			if (!th_isfinite(w[i])) w[i]=b[(i-1)*n+i]; /* avoid potential inf */
 
-            /**/
             // Cannot vectorize over i because each step uses all previous w[i]
             // Instead, vectorize over k to perform sum of products
             e_fp* bstart = b+i, wstart = w+i-1;
+            uint32_t vl;
             e_fp sum;
             const int bstride = n*(32>>3), wstride = -(32>>3); // Strides for k*n, -k (in bytes) as k increments
-            __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(1));
-            __asm__ volatile("vmv.s.x v7, %0" : : "=r"(w[i]));
             for (k=0; k<i; k+=vl) {
-                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(i-vl));
+                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(k-i));
                 // Multiply inputs from b and w
-                __asm__ volatile("vlse32.v v8, (%0), %1" : : "r"(b+i) :"r"(bstride)); //b[k*n+i]
+                __asm__ volatile("vlse32.v v0, (%0), %1" : : "r"(b+i) :"r"(bstride)); //b[k*n+i]
                 __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(w) :"r"(wstride)); //w[(i-k)-1]
-                __asm__ volatile("vfmul.vv v24, v16, v8");
-
-                // Vector isfinite: Check that output is a number
-                // ASSUMPTION: !isfinite reassignment is meant to reassign the addend, not the sum
-                __asm__ volatile("vfclass.v v16, v24");
-                // RISCV Convention denotes negative normal, -0, +0, and positive normal
-                //  with bits 1,3,4,6 of classify's output. If any are 1, the number is finite.
-                // isfinite considers subnormal numbers to be invalid, so this does as well
-                __asm__ volatile("vand.vx v16, v16, %0" : : : "r"(0b1011010)); 
-                // For all non-finite elements (has 0 in v16), overwrite with b[k*n+i]
-                __asm__ volatile("vmseq.vi v0, v16, 0");
-                __asm__ volatile("vmv.v.v v16, v8, v0.t");
+                __asm__ volatile("vfmul.vv v16, v16, v0");
 
                 // Sum
-                __asm__ volatile("vfredosum.vs v7, v16, v7");
+                // Currently the result and not addend is overwritten if infinite.
+                // Need to check every sum in case one is denormal.
+                // If this were changed, would do a masked vmv and vfredosum instead of loop.
+                uint32_t curr_b_elem = 0;
+                for (int j = 0; j<vl; j++) {
+                    __asm__ volatile("vfmv.f.s %0, v16" : "=f"(sum));
+                    w[i] += sum;
+                    if (!th_isfinite(w[i])) {
+                        __asm__ volatile("vslidedown.vx v0, v0, %0") : : : "=r"(j-curr_b_elem);
+                        __asm__ volatile("vfmv.f.s %0, v0" : "=f"(sum));
+                        w[i] = sum;
+                        curr_b_elem = j;
+                    }
+                    // Get next term for sum
+                    __asm__ volatile("vslidedown.vi v16, v16, 1");
+                }
                 
                 wstart -= vl;
                 bstart += vl*k;
             }
-            // Set w[i] to final result
-            __asm__ volatile("vmv.x.s %0, v7" : "=r"(sum));
-            w[i] = sum;
-
             #else
             for ( k=0 ; k<i ; k++ ) {
                 w[i] = b[k*n+i] * w[(i-k)-1];
