@@ -974,9 +974,10 @@ e_fp linear_recurrence(loops_params *p) {
             // W(i) to itself in the inner loop instead of repeatedly reassigning it.
             // Once the output checks are updated, vectorizing the inner loop will be more efficient.
             // If !isfinite check changed, also fix sum loop.
-            /*w[i] = b[(i-1)*n+i] * w[0];
+            w[i] = b[(i-1)*n+i] * w[0];
 			if (!th_isfinite(w[i])) w[i]=b[(i-1)*n+i]; /* avoid potential inf */
 
+            /*
             // Cannot vectorize over i because each step uses all previous w[i]
             // Instead, vectorize over k to perform sum of products
             e_fp* bstart = b+i, wstart = w+i-1;
@@ -1010,7 +1011,7 @@ e_fp linear_recurrence(loops_params *p) {
                 
                 wstart -= vl;
                 bstart += vl*k;
-            }
+            }*/
             #else
             for ( k=0 ; k<i ; k++ ) {
                 w[i] = b[k*n+i] * w[(i-k)-1];
