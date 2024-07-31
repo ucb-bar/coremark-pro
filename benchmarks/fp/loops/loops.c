@@ -897,12 +897,33 @@ e_fp banded_linear(loops_params *p) {
     m = ( 1001-7 )/2;
     for ( l=1 ; l<=loop ; l++ ) {
         for ( k=6 ; k<1001 ; k=k+m ) {
+            #if USE_RVV
+            // Innermost loop vectorized because outer only does a few iterations
+            unsigned int vl;
+            const unsigned int ystride = 5*sizeof(e_fp);
+            unsigned int remaining = (n-4)/5;
+            e_fp* xptr = x+(k-6);
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl), "r"(1));
+            __asm__ volatile("vfmv.s.f v0, %0" : "f"(x[k-1]));
+            for (j=4; j<n; j+=5*vl) {
+                __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl), "r"(remaining));
+                __asm__ volatile("vle32.v v8, %0": "r"(xptr)); //x[lw]
+                __asm__ volatile("vlse32.v v16, (%0), %1" : "r"(y+j), "r"(ystride)); //y[j]
+                __asm__ volatile("vfmul.vv v32, v8, v16"); //x[lw]*y[j]
+                __asm__ volatile("vfrsub.vf v32, v32, %0" : "f"(0)); //-x[lw]*y[j]
+                __asm__ volatile("vfredosum.v v0, v32, v0"); //temp += -x[lw]*y[j]
+                xptr += vl;
+                remaining -= vl;
+            }
+            __asm__ volatile("vfmv.f.s %0, v0" : "f"(x[k-1]));
+            #else
             lw = k - 6;
             temp = x[k-1];
             for ( j=4 ; j<n ; j=j+5 ) {
                 temp -= x[lw]*y[j];
                 lw++;
             }
+            #endif
             x[k-1] = y[4]*temp;
         }
     }
@@ -983,7 +1004,7 @@ e_fp linear_recurrence(loops_params *p) {
             e_fp* bstart = b+i, wstart = w+i-1;
             uint32_t vl;
             e_fp sum;
-            const int bstride = n*(32>>3), wstride = -(32>>3); // Strides for k*n, -k (in bytes) as k increments
+            const int bstride = n*sizeof(e_fp), wstride = -sizeof(e_fp); // Strides for k*n, -k (in bytes) as k increments
             for (k=0; k<i; k+=vl) {
                 __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(k-i));
                 // Multiply inputs from b and w
