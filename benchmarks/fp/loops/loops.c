@@ -723,10 +723,10 @@ e_fp hydro_fragment(loops_params *p) {
             __asm__ volatile ("vle32.v v16, (%0)" : : "r"(z+k+10)); //z[k+10]
             __asm__ volatile ("vfmul.vf v8, v16, %0" : : : "f"(r)); //r*
             __asm__ volatile ("vle32.v v24, (%0)" : : "r"(z+k+11)); //z[k+11]
-            __asm__ volatile ("vfmacc.vf v8, v24, %" : : : "f"(t)); //+t*
+            __asm__ volatile ("vfmacc.vf v8, v24, %" : : "f"(t)); //+t*
             __asm__ volatile ("vle32.v v0, (%0)" : : "r"(y+k));     //y[k]
             __asm__ volatile ("vfmul.vv v16, v8, v0");              //y*()
-            __asm__ volatile ("vfadd.vf v24, v16, %0" : : : "f"(q)) //q+
+            __asm__ volatile ("vfadd.vf v24, v16, %0" : : "f"(q)) //q+
             __asm__ volatile ("vse32.v v0, (%0)" : : "r"(x+k));     //x[k]=
         }
         #else
@@ -903,19 +903,19 @@ e_fp banded_linear(loops_params *p) {
             const unsigned int ystride = 5*sizeof(e_fp);
             unsigned int remaining = (n-4)/5;
             e_fp* xptr = x+(k-6);
-            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl), "r"(1));
-            __asm__ volatile("vfmv.s.f v0, %0" : "f"(x[k-1]));
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(1));
+            __asm__ volatile("vfmv.s.f v0, %0" : : "f"(x[k-1]));
             for (j=4; j<n; j+=5*vl) {
-                __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl), "r"(remaining));
-                __asm__ volatile("vle32.v v8, %0": "r"(xptr)); //x[lw]
-                __asm__ volatile("vlse32.v v16, (%0), %1" : "r"(y+j), "r"(ystride)); //y[j]
+                __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(remaining));
+                __asm__ volatile("vle32.v v8, %0": : "r"(xptr)); //x[lw]
+                __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(y+j), "r"(ystride)); //y[j]
                 __asm__ volatile("vfmul.vv v32, v8, v16"); //x[lw]*y[j]
-                __asm__ volatile("vfrsub.vf v32, v32, %0" : "f"(0)); //-x[lw]*y[j]
+                __asm__ volatile("vfrsub.vf v32, v32, %0" : : "f"(0)); //-x[lw]*y[j]
                 __asm__ volatile("vfredosum.v v0, v32, v0"); //temp += -x[lw]*y[j]
                 xptr += vl;
                 remaining -= vl;
             }
-            __asm__ volatile("vfmv.f.s %0, v0" : "f"(x[k-1]));
+            __asm__ volatile("vfmv.f.s %0, v0" : "=f"(x[k-1]));
             #else
             lw = k - 6;
             temp = x[k-1];
@@ -1008,8 +1008,8 @@ e_fp linear_recurrence(loops_params *p) {
             for (k=0; k<i; k+=vl) {
                 __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(k-i));
                 // Multiply inputs from b and w
-                __asm__ volatile("vlse32.v v0, (%0), %1" : : "r"(b+i) :"r"(bstride)); //b[k*n+i]
-                __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(w) :"r"(wstride)); //w[(i-k)-1]
+                __asm__ volatile("vlse32.v v0, (%0), %1" : : "r"(b+i), "r"(bstride)); //b[k*n+i]
+                __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(w), "r"(wstride)); //w[(i-k)-1]
                 __asm__ volatile("vfmul.vv v16, v16, v0");
 
                 // Sum
@@ -1021,7 +1021,7 @@ e_fp linear_recurrence(loops_params *p) {
                     __asm__ volatile("vfmv.f.s %0, v16" : "=f"(sum));
                     w[i] += sum;
                     if (!th_isfinite(w[i])) {
-                        __asm__ volatile("vslidedown.vx v0, v0, %0") : : : "=r"(j-curr_b_elem);
+                        __asm__ volatile("vslidedown.vx v0, v0, %0") : "=r"(j-curr_b_elem);
                         __asm__ volatile("vfmv.f.s %0, v0" : "=f"(sum));
                         w[i] = sum;
                         curr_b_elem = j;
@@ -1084,35 +1084,35 @@ e_fp state_fragment(loops_params *p) {
         // u[k] + r*( z[k] + r*y[k] )
         __asm__ volatile ("vle32.v v0, (%0)" : : "r"(y+k)); //y[k]
         __asm__ volatile ("vle32.v v8, (%0)" : : "r"(z+k)); //z[k]
-        __asm__ volatile ("vfmadd.vf v0, v8, %0" : : : "f"(r)); //A= z[k]+r*y[k]
+        __asm__ volatile ("vfmadd.vf v0, v8, %0" : : "f"(r)); //A= z[k]+r*y[k]
         __asm__ volatile ("vle32.v v16, (%0)" : : "r"(u+k)); //u[k]
-        __asm__ volatile ("vfmadd.vf v0, v16, %0" : : : "f"(r)); //B= u[k]+r*A
+        __asm__ volatile ("vfmadd.vf v0, v16, %0" : : "f"(r)); //B= u[k]+r*A
 
         // + t*( u[k+3] + r*(u[k+2] + r*u[k+1])
         // Load last scalar of u[k+1] vector and use u[k] for the rest
         // Alt implementation: Load u+vl to u+vl+5 as a vector and slide appropriate parts
         // but requires two slide operations for u+#
         u1 = u[k+vl];
-        __asm__ volatile ("vfslide1down.vf v16, v16, (%0)" : : : "f"(u1)); //u[k+1]
+        __asm__ volatile ("vfslide1down.vf v16, v16, (%0)" : : "f"(u1)); //u[k+1]
         u2 = u[k+vl+1];
-        __asm__ volatile ("vfslide1down.vf v24, v16, (%0)" : : : "f"(u2)); //u[k+2]
-        __asm__ volatile ("vfmadd.vf v16, v24, %0" : : : "f"(r)); // C= u[k+2] + r*u[k+1]
+        __asm__ volatile ("vfslide1down.vf v24, v16, (%0)" : : "f"(u2)); //u[k+2]
+        __asm__ volatile ("vfmadd.vf v16, v24, %0" : : "f"(r)); // C= u[k+2] + r*u[k+1]
         u3 = u[k+vl+2];
-        __asm__ volatile ("vfslide1down.vf v8, v24, (%0)" : : : "f"(u3)); //u[k+3]
-        __asm__ volatile ("vfmadd.vf v16, v8, %0" : : : "f"(r)); // D= u[k+3]+r*C
-        __asm__ volatile ("vfmacc.vf v0, v16, %0" : : : "f"(t)); // B+= t*D
+        __asm__ volatile ("vfslide1down.vf v8, v24, (%0)" : : "f"(u3)); //u[k+3]
+        __asm__ volatile ("vfmadd.vf v16, v8, %0" : : "f"(r)); // D= u[k+3]+r*C
+        __asm__ volatile ("vfmacc.vf v0, v16, %0" : : "f"(t)); // B+= t*D
 
         
         // +t*( u[k+6] + r*( u[k+5] + r*u[k+4])))
         u1 = u[k+vl+3];
-        __asm__ volatile ("vfslide1down.vf v8, v8, (%0)" : : : "f"(u1)); //u[k+4]
+        __asm__ volatile ("vfslide1down.vf v8, v8, (%0)" : : "f"(u1)); //u[k+4]
         u2 = u[k+vl+4];
-        __asm__ volatile ("vfslide1down.vf v16, v8, (%0)" : : : "f"(u2)); //u[k+5]
-        __asm__ volatile ("vfmadd.vf v8, v16, %0" : : : "f"(r)); // E= u[k+5] + r*u[k+4]
+        __asm__ volatile ("vfslide1down.vf v16, v8, (%0)" : : "f"(u2)); //u[k+5]
+        __asm__ volatile ("vfmadd.vf v8, v16, %0" : : "f"(r)); // E= u[k+5] + r*u[k+4]
         u3 = u[k+vl+5];
-        __asm__ volatile ("vfslide1down.vf v24, v16, (%0)" : : : "f"(u3)); //u[k+6]
-        __asm__ volatile ("vfmacc.vf v24, v8, %0" : : : "f"(r)); // F= u[k+6] + r*E
-        __asm__ volatile ("vfmacc.vf v0, v24, %0" : : : "f"(t)); // B+= t*F
+        __asm__ volatile ("vfslide1down.vf v24, v16, (%0)" : : "f"(u3)); //u[k+6]
+        __asm__ volatile ("vfmacc.vf v24, v8, %0" : : "f"(r)); // F= u[k+6] + r*E
+        __asm__ volatile ("vfmacc.vf v0, v24, %0" : : "f"(t)); // B+= t*F
 
         __asm__ volatile ("vse32.v v0, (%0)" : : "r"(x+k)); // x[k]= B
       }
