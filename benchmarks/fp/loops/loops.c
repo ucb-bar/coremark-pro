@@ -1401,6 +1401,48 @@ e_fp integrate_predictors(loops_params *p) {
 
     for ( l=1 ; l<=loop ; l++ ) {
 		reinit_vec(p,dm,30); /* reinit to make sure each loop needs to be executed */
+        #if USE_RVV
+        // Vectors run over loop iterations instead of within them to allow longer vectors for small elements
+        size_t vl;
+        vfloat32m8_t sum, pxtemp, pxadd;
+        vfloat32m1_t vret =  __riscv_vfmv_s_f_f32m1(ret, vl);
+        for (i=0; i<n; i+=vl) {
+            vl = _riscv_vsetvl_e32m8(n);
+            // Strided load from px[i*13+#]
+            sum = __riscv_vlse32_v_f32m8(px+i*13+12, 13, vl);
+            sum = __riscv_vfmul_vf_f32m8(sum, dm[28], vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+11, 13, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[27], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+10, 13, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[26], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+9, 13, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[25], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+8, 13, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[24], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+7, 13, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[23], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+6, 13, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[22], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+5, 13, vl);
+            pxadd = __riscv_vlse32_v_f32m8(px+i*13+4, 13, vl);
+            pxtemp = __riscv_vfadd_vv_f32m8(pxtemp, pxadd, vl);
+            sum = __riscv_vfmacc_vf_f32m8(sum, dm[0], pxtemp, vl);
+
+            pxtemp = __riscv_vlse32_v_f32m8(px+i*13+2, 13, vl);
+            sum = __riscv_vfadd_vv_f32m8(pxtemp, sum);
+
+            __riscv_vsse32_v_f32m8(px+i*13, 13, sum, vl);
+            vret = __riscv_vfredosum_vs_f32m8_f32m1(sum, vret, vl);
+        }
+        ret = __riscv_vfmv_f_s_f32m1_f32(vret);
+        #else
         for ( i=0 ; i<n ; i++ ) {
             px[i*13] = dm[28]*px[i*13+12] + dm[27]*px[i*13+11] + dm[26]*px[i*13+10] +
                        dm[25]*px[i*13+ 9] + dm[24]*px[i*13+ 8] + dm[23]*px[i*13+ 7] +
@@ -1408,6 +1450,7 @@ e_fp integrate_predictors(loops_params *p) {
         }
 		for ( i=0 ; i<n ; i++ )
 			ret+=px[i*13];
+        #endif
 		ret/=(e_fp)n; /* feedback to make sure all loops get executed */
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\nipred %d:",debug_counter++);
