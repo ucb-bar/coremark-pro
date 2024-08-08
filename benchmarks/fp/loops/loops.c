@@ -903,10 +903,10 @@ e_fp banded_linear(loops_params *p) {
             const unsigned int ystride = 5*sizeof(e_fp);
             unsigned int remaining = (n-4)/5;
             e_fp* xptr = x+(k-6);
-            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(1));
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(1));
             __asm__ volatile("vfmv.s.f v0, %0" : : "f"(x[k-1]));
             for (j=4; j<n; j+=5*vl) {
-                __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(remaining));
+                __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(remaining));
                 __asm__ volatile("vle32.v v8, %0": : "r"(xptr)); //x[lw]
                 __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(y+j), "r"(ystride)); //y[j]
                 __asm__ volatile("vfmul.vv v32, v8, v16"); //x[lw]*y[j]
@@ -1577,9 +1577,43 @@ e_fp first_dif(loops_params *p) {
 	reinit_vec(p,x,n);
     for ( l=0 ; l<=loop ; l++ ) {
 		reinit_vec(p,y,n+1);
+        
+        #if USE_RVV
+        if (n!=0) { // Cover edge case to allow loading y[0]
+
+        size_t vl;
+        __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(n));
+        // Put first element into y[k] vector
+        __asm__ volatile("vfmv.s.f v8, (%0)" : : "r"(y[0]));
+
+        // Set up body and tail to remove extra vsetvli and the last slidedown
+        unsigned int tail = n%vl;
+        size_t slidedown = vl-1;
+
+        for (k=0; k<n-tail; k+=vl) {
+            __asm__ volatile("vle32.v v0, (%0)" : : "r"(y+k+1)); //y[k+1]
+            // Move the rest of the y[k] vector
+            __asm__ volatile("vslideup.vi v8, v0, 1");
+            __asm__ volatile("vfsub.vv v16, v0, v8");
+            __asm__ volatile("vse32.v v16, (%0)" : : "r"(x+k));
+            // Put first element into y[k] vector
+            __asm__ volatile("vslidedown.vx v8, v0, %0" : : "r" (slidedown));
+        }
+
+        // Tail
+        __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(tail));
+        __asm__ volatile("vle32.v v0, (%0)" : : "r"(y+k+1)); //y[k+1]
+        __asm__ volatile("vslideup.vi v8, v0, 1");
+        // Move the rest of the y[k] vector
+        __asm__ volatile("vfsub.vv v16, v0, v8");
+        __asm__ volatile("vse32.v v16, (%0)" : : "r"(x+k));
+        }
+
+        #else
         for ( k=0 ; k<n ; k++ ) {
             x[k]+= y[k+1] - y[k];
         }
+        #endif
     }
 
 	return get_array_feedback(x,n);
