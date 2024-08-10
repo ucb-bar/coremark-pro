@@ -1498,6 +1498,81 @@ e_fp difference_predictors(loops_params *p) {
 
     for ( l=1 ; l<=loop ; l++ ) {
 		reinit_vec(p,cx,n); /* initializers to make sure all loops need to be executed */
+
+        #if USE_RVV
+        // No vectorization within loop
+        // Each temp. var. is a running difference of px elements, and px is updated with the partial results.
+        // Each inner loop is self-contained.
+        size_t vl;
+        e_fp *vec_start = px+4;
+        
+        /*__asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(n));
+        int body_loops = n/vl;
+        e_fp* body_end = vec_start + 14*vl*body_loops;
+        int tail_loops = n%vl;
+        e_fp* tail_end = vec_start + 14*n*body_loops;
+
+        while (vec_start<body_end) {*/
+
+        for (i=0; i<n; i+=vl) {
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(n-i))
+            temp_addr = vec_start;
+
+            __asm__ volatile("vle32.v v0, %0" : : "r"(cx)); // ar
+
+            // Unroll the potential loop to use different registers
+            __asm__ volatile("vlse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+4]
+            __asm__ volatile("vfsub.vv v16, v0, v8"); // br = ar-px[14*i+4]
+            __asm__ volatile("vsse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+4] = ar
+            temp_addr++;
+            
+            // Each address is loaded once in original code, so slidedown won't help here.
+            __asm__ volatile("vlse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+5]
+            __asm__ volatile("vfsub.vv v8, v16, v24"); // cr = br-px[14*i+5]
+            __asm__ volatile("vsse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+5] = br
+            temp_addr++;
+
+            __asm__ volatile("vlse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+6]
+            __asm__ volatile("vfsub.vv v24, v8, v0"); // ar = cr-px[14*i+6]
+            __asm__ volatile("vsse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+6] = cr
+            temp_addr++;
+
+            __asm__ volatile("vlse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+7]
+            __asm__ volatile("vfsub.vv v0, v24, v16"); // br = ar-px[14*i+7]
+            __asm__ volatile("vsse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+7] = ar
+            temp_addr++;
+
+            __asm__ volatile("vlse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+8]
+            __asm__ volatile("vfsub.vv v16, v0, v8"); // cr = br-px[14*i+8]
+            __asm__ volatile("vsse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+8] = br
+            temp_addr++;
+            
+            __asm__ volatile("vlse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+9]
+            __asm__ volatile("vfsub.vv v8, v16, v24"); // ar = cr-px[14*i+9]
+            __asm__ volatile("vsse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+9] = cr
+            temp_addr++;
+
+            __asm__ volatile("vlse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+10]
+            __asm__ volatile("vfsub.vv v24, v8, v0"); // br = ar-px[14*i+10]
+            __asm__ volatile("vsse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+10] = ar
+            temp_addr++;
+
+            __asm__ volatile("vlse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+11]
+            __asm__ volatile("vfsub.vv v0, v24, v16"); // cr = br-px[14*i+11]
+            __asm__ volatile("vsse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+11] = br
+            temp_addr++;
+
+            __asm__ volatile("vlse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+12]
+            __asm__ volatile("vfsub.vv v16, v0, v8"); // cr-px[14*i+12]
+            __asm__ volatile("vsse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+12] = cr
+            temp_addr++;
+            
+            __asm__ volatile("vsse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+13] = cr-px[14*i+12]
+
+            vec_start += 14*vl;
+        }
+        
+        #else
         for ( i=0 ; i<n ; i++ ) {
             ar        =      cx[i];
             br        = ar - px[14*i+ 4];
@@ -1519,6 +1594,7 @@ e_fp difference_predictors(loops_params *p) {
             px[14*i+13] = cr - px[14*i+12];
             px[14*i+12] = cr;
         }
+        #endif
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\npred %d:",debug_counter++);
 	th_print_fp(px[0]);
@@ -1577,7 +1653,7 @@ e_fp first_dif(loops_params *p) {
 	reinit_vec(p,x,n);
     for ( l=0 ; l<=loop ; l++ ) {
 		reinit_vec(p,y,n+1);
-        
+
         #if USE_RVV
         if (n!=0) { // Cover edge case to allow loading y[0]
 
