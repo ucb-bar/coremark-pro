@@ -721,7 +721,7 @@ e_fp hydro_fragment(loops_params *p) {
         for (k=0 ; k<n ; k+=vl) {
             __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
             __asm__ volatile ("vle32.v v16, (%0)" : : "r"(z+k+10)); //z[k+10]
-            __asm__ volatile ("vfmul.vf v8, v16, %0" : : : "f"(r)); //r*
+            __asm__ volatile ("vfmul.vf v8, v16, %0" : : "f"(r)); //r*
             __asm__ volatile ("vle32.v v24, (%0)" : : "r"(z+k+11)); //z[k+11]
             __asm__ volatile ("vfmacc.vf v8, v24, %" : : "f"(t)); //+t*
             __asm__ volatile ("vle32.v v0, (%0)" : : "r"(y+k));     //y[k]
@@ -1505,14 +1505,6 @@ e_fp difference_predictors(loops_params *p) {
         // Each inner loop is self-contained.
         size_t vl;
         e_fp *vec_start = px+4;
-        
-        /*__asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(n));
-        int body_loops = n/vl;
-        e_fp* body_end = vec_start + 14*vl*body_loops;
-        int tail_loops = n%vl;
-        e_fp* tail_end = vec_start + 14*n*body_loops;
-
-        while (vec_start<body_end) {*/
 
         for (i=0; i<n; i+=vl) {
             __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(n-i))
@@ -1521,53 +1513,53 @@ e_fp difference_predictors(loops_params *p) {
             __asm__ volatile("vle32.v v0, %0" : : "r"(cx)); // ar
 
             // Unroll the potential loop to use different registers
-            __asm__ volatile("vlse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+4]
+            __asm__ volatile("vlse32.v v8, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+4]
             __asm__ volatile("vfsub.vv v16, v0, v8"); // br = ar-px[14*i+4]
-            __asm__ volatile("vsse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+4] = ar
+            __asm__ volatile("vsse32.v v0, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+4] = ar
             temp_addr++;
             
             // Each address is loaded once in original code, so slidedown won't help here.
-            __asm__ volatile("vlse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+5]
+            __asm__ volatile("vlse32.v v24, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+5]
             __asm__ volatile("vfsub.vv v8, v16, v24"); // cr = br-px[14*i+5]
-            __asm__ volatile("vsse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+5] = br
+            __asm__ volatile("vsse32.v v16, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+5] = br
             temp_addr++;
 
-            __asm__ volatile("vlse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+6]
+            __asm__ volatile("vlse32.v v0, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+6]
             __asm__ volatile("vfsub.vv v24, v8, v0"); // ar = cr-px[14*i+6]
-            __asm__ volatile("vsse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+6] = cr
+            __asm__ volatile("vsse32.v v8, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+6] = cr
             temp_addr++;
 
-            __asm__ volatile("vlse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+7]
+            __asm__ volatile("vlse32.v v16, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+7]
             __asm__ volatile("vfsub.vv v0, v24, v16"); // br = ar-px[14*i+7]
-            __asm__ volatile("vsse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+7] = ar
+            __asm__ volatile("vsse32.v v24, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+7] = ar
             temp_addr++;
 
-            __asm__ volatile("vlse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+8]
+            __asm__ volatile("vlse32.v v8, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+8]
             __asm__ volatile("vfsub.vv v16, v0, v8"); // cr = br-px[14*i+8]
-            __asm__ volatile("vsse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+8] = br
+            __asm__ volatile("vsse32.v v0, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+8] = br
             temp_addr++;
             
-            __asm__ volatile("vlse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+9]
+            __asm__ volatile("vlse32.v v24, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+9]
             __asm__ volatile("vfsub.vv v8, v16, v24"); // ar = cr-px[14*i+9]
-            __asm__ volatile("vsse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+9] = cr
+            __asm__ volatile("vsse32.v v16, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+9] = cr
             temp_addr++;
 
-            __asm__ volatile("vlse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+10]
+            __asm__ volatile("vlse32.v v0, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+10]
             __asm__ volatile("vfsub.vv v24, v8, v0"); // br = ar-px[14*i+10]
-            __asm__ volatile("vsse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+10] = ar
+            __asm__ volatile("vsse32.v v8, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+10] = ar
             temp_addr++;
 
-            __asm__ volatile("vlse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+11]
+            __asm__ volatile("vlse32.v v16, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+11]
             __asm__ volatile("vfsub.vv v0, v24, v16"); // cr = br-px[14*i+11]
-            __asm__ volatile("vsse32.v v24, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+11] = br
+            __asm__ volatile("vsse32.v v24, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+11] = br
             temp_addr++;
 
-            __asm__ volatile("vlse32.v v8, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+12]
+            __asm__ volatile("vlse32.v v8, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+12]
             __asm__ volatile("vfsub.vv v16, v0, v8"); // cr-px[14*i+12]
-            __asm__ volatile("vsse32.v v0, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+12] = cr
+            __asm__ volatile("vsse32.v v0, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+12] = cr
             temp_addr++;
             
-            __asm__ volatile("vsse32.v v16, %0, %1" : : "A"(temp_addr), "r"(14)); // px[14*i+13] = cr-px[14*i+12]
+            __asm__ volatile("vsse32.v v16, %0, %1" : : "r"(temp_addr), "r"(14)); // px[14*i+13] = cr-px[14*i+12]
 
             vec_start += 14*vl;
         }
@@ -1896,6 +1888,68 @@ e_fp pic_1d(loops_params *p) {
 	flx=FPCONST(0.00100e0);
 
     for ( l=1 ; l<=loop ; l++ ) {
+        #if USE_RVV
+        size_t vl;
+        for (k=0; k<n; k+=vl) {
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
+
+            __asm__ volatile("vle32.v v0, (%0)" : : "r"(grd+k)); // grd[k]
+            __asm__ volatile("vmv.v.x v8, %0" : : "f"(0.0)); // 0.0
+            __asm__ volatile("vse32.v v8, (%0)" : : "r"(vx+k)); // vx[k] = 0.0
+            __asm__ volatile("vse32.v v8, (%0)" : : "r"(xx+k)); // xx[k] = 0.0
+            // Might need to be adjusted to support different lengths
+            __asm__ volatile("vfcvt.rtz.x.f.v v16, v0"); // (long) grd[k]
+            __asm__ volatile("vfadd.vx v0, v0, %0" : : "f"(EE_EPSINI)); //+=EE_EPSINI
+            __asm__ volatile("vse32.v v0, (%0)" : : "r"(grd+k)); // grd[k] +=EE_EPSINI
+            __asm__ volatile("vadd.vi v0, v16, -1"); // ix[k]-1
+            __asm__ volatile("vse32.v v16, (%0)" : : "r"(ix+k)); // ix[k] = (long) grd[k];
+            __asm__ volatile("vloxei32.v v8, (%0), v0" : : "r"(ex)); // ex[ix[k]-1];
+            __asm__ volatile("vfcvt.f.x.v v24, v16"); // (e_fp) ix[k]
+            __asm__ volatile("vse32.v v8, (%0)" : : "r"(ex1 + k)); //ex1[k] = ex[ix[k]-1];
+            __asm__ volatile("vloxei32.v v16, (%0), v0" : : "r"(dex)); // ex[ix[k]-1];
+            __asm__ volatile("vse32.v v24, (%0)" : : "r"(xi+k)); // xi[k] = (e_fp) ix[k];
+            __asm__ volatile("vse32.v v16, (%0)" : : "r"(dex1 + k)); //dex1[k] = dex[ix[k]-1];
+        }
+
+        for (k=0; k<n; k+=vl) {
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
+
+            __asm__ volatile("vle32.v v0 (%0)" : : "r"(xx+k)); // xx[k]
+            __asm__ volatile("vle32.v v8 (%0)" : : "r"(xi+k)); // xi[k]
+
+            __asm__ volatile("vle32.v v16 (%0)" : : "r"(dex1+k)); //dex1[k]
+            __asm__ volatile("vle32.v v24, (%0)" : : "r"(ex1+k)); // ex1[k]
+
+            __asm__ volatile("vfsub.vv v8, v0, v8"); // (xx[k]-xi[k])
+            // Bottleneck: vfmadd requires 3 vectors, and its computation is needed for everything else
+            // Room for optimization by doing part of another loop iteration at this time
+            __asm__ volatile("vfmadd.vv v24, v8, v16"); // ex1[k] + ( xx[k] - xi[k] )*dex1[k]
+            __asm__ volatile("vle32.v v8, (%0)" : : "r"(vx+k)); // vx[k]
+            __asm__ volatile("vfadd.vv v8, v8, v24"); // vx[k] + ex1[k] + ( xx[k] - xi[k] )*dex1[k]
+            __asm__ volatile("vfadd.vx v16, v8, %0" : : "f"(flx)); // vx[k]+flx
+            __asm__ volatile("vfadd.vv v0, v0, v16"); // xx[k] += vx[k] + flx
+            __asm__ volatile("vse32.v v8, (%0)" : : "r"(vx+k)); // vx[k] = vx[k] + ex1[k] + ...
+
+            __asm__ volatile("vfcvt.rtz.x.f.v v24, v0"); // ir[k]=(e_u32)xx[k]
+            __asm__ volatile("vfcvt.f.x.v v16, v24"); // float ir[k]
+            __asm__ volatile("vand.vx v24, v24, %0" : : "r"(n-1)); // ir[k] & (n-1)
+            __asm__ volatile("vfsub.vv v0, v0, v16"); // xx[k]-(float)ir[k]
+            __asm__ volatile("vadd.vi v24, v24, 1"); // (ir[k] & (n-1)) +1
+            __asm__ volatile("vse32.v v0, (%0)" : : "r"(rx+k)); // rx[k]=xx[k]-ir[k]
+            __asm__ volatile("vfcvt.f.x.v v16, v24"); // float (ir[k] & (n-1)) +1
+            __asm__ volatile("vse32.v v24, (%0)" : : "r"(ir+k)); // ir[k]=(ir[k] & (n-1)) +1
+            __asm__ volatile("vfadd.vv v12, v16, v0"); // rx[k] + ir[k];
+            __asm__ volatile("vse32.v v12, (%0)" : : "r"(xx+k)); // xx[k] = rx[k] + ir[k];
+            }
+
+        // Highly unpredictable: may access the same address multiple times in a vector
+        // Perform scalar loop to preserve order of additions
+        for ( k=0 ; k<n ; k++ ) {
+            rh[ ir[k]-1 ] += FPCONST(1.0) - rx[k];
+            rh[ ir[k]   ] += rx[k];
+        }
+
+        #else
         for ( k=0 ; k<n ; k++ ) {
             vx[k] = FPCONST(0.0);
             xx[k] = FPCONST(0.0);
@@ -1919,6 +1973,7 @@ e_fp pic_1d(loops_params *p) {
             rh[ ir[k]-1 ] += FPCONST(1.0) - rx[k];
             rh[ ir[k]   ] += rx[k];
         }
+        #endif
 #if (BMDEBUG && DEBUG_ACCURATE_BITS)
 	th_printf("\n1d %d:",debug_counter++);
 	th_print_fp(rh[0]);
