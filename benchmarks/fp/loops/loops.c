@@ -2660,10 +2660,40 @@ e_fp firstmin(loops_params *p) {
     for ( l=1 ; l<=loop ; l++ ) {
 		reinit_vec(p,x,n); /* must reinit otherwise compiler can execute only the last loop */
 		x[n/2] = FPCONST(-1.0e+10);
+        #if USE_RVV
+        size_t vl;
+        __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(k): "r"(n));
+        // Holds current minimum found
+        __asm__ volatile("vle32.v v16, (%0)" : : "r"(x)); // Load initial x[m] into v16
+        // Holds indices of currently found minima
+        __asm__ volatile("vid.v v8"); // m= 0 through vl-1
+
+        for (; k<n; k+=vl) {
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl): "r"(n-k));
+            // Holds new elements to test for minima
+            __asm__ volatile("vle32.v v24, (%0)" : : "r"(x+k)); // x[k]
+            __asm__ volatile("vmflt.vv v0, v24, v16"); // v0 = if x[k] < x[m]
+
+            // For each element, if v0, then
+            // Track the element x[k]
+            __asm__ volatile("vmv.vv v16, v24, v0.t");
+            // Track its index k
+            __asm__ volatile("vid.v v8, v0.t"); // index offsets from k [0, 1, 2...]
+            __asm__ volatile("vadd.vx v8, v8, %0, v0.t" : : "r"(k)); // k
+        }
+
+        __asm__ volatile("vfredmin.vs v24, v16, v16"); // Find final minimum
+        __asm__ volatile("vfmv.f.s f0, v24");
+        __asm__ volatile("vmfeq.vf v0, v16, f0"); // Check which local mins are equal to it
+        __asm__ volatile("vfirst.m t0, v0"); // Find first vector element with that min
+        __asm__ volatile("vslidedown.vi v8, v8, t0"); // Find index of x in the vector of indices
+        __asm__ volatile("vmv.vx %0, v8" : "=r"(m)); // Put it in m
+        #else
         m = 0;
         for ( k=1 ; k<n ; k++ ) {
             if ( x[k] < x[m] ) m = k;
         }
+        #endif
 		ret+=m;
     }
 	return (e_fp)ret;
