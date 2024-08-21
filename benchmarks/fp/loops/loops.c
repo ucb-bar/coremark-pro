@@ -781,7 +781,7 @@ e_fp cholesky(loops_params *p) {
             uint32_t vl = 1;
             for (k=ipnt+1; k<ipntp; k= k+(vl<<1)) {
                 x_out += vl;
-                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(k));
+                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"((ipntp-k)/2));
 
                 __asm__ volatile ("vle32.v v0, (%0)" : : "r"(v+k));    //v[k]
                 __asm__ volatile ("vle32.v v8, (%0)" : : "r"(x+k-1));  //x[k-1]
@@ -1006,7 +1006,7 @@ e_fp linear_recurrence(loops_params *p) {
             e_fp sum;
             const int bstride = n*sizeof(e_fp), wstride = -sizeof(e_fp); // Strides for k*n, -k (in bytes) as k increments
             for (k=0; k<i; k+=vl) {
-                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(k-i));
+                __asm__ volatile ("vsetvli %0, %1, e32, m8, ta, mu" : "=r"(vl) : "r"(i-k));
                 // Multiply inputs from b and w
                 __asm__ volatile("vlse32.v v0, (%0), %1" : : "r"(b+i), "r"(bstride)); //b[k*n+i]
                 __asm__ volatile("vlse32.v v16, (%0), %1" : : "r"(w), "r"(wstride)); //w[(i-k)-1]
@@ -1407,7 +1407,7 @@ e_fp integrate_predictors(loops_params *p) {
         vfloat32m8_t sum, pxtemp, pxadd;
         vfloat32m1_t vret =  __riscv_vfmv_s_f_f32m1(ret, vl);
         for (i=0; i<n; i+=vl) {
-            vl = _riscv_vsetvl_e32m8(n);
+            vl = _riscv_vsetvl_e32m8(n-i);
             // Strided load from px[i*13+#]
             sum = __riscv_vlse32_v_f32m8(px+i*13+12, 13, vl);
             sum = __riscv_vfmul_vf_f32m8(sum, dm[28], vl);
@@ -1891,7 +1891,7 @@ e_fp pic_1d(loops_params *p) {
         #if USE_RVV
         size_t vl;
         for (k=0; k<n; k+=vl) {
-            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
 
             __asm__ volatile("vle32.v v0, (%0)" : : "r"(grd+k)); // grd[k]
             __asm__ volatile("vmv.v.x v8, %0" : : "f"(0.0)); // 0.0
@@ -1912,7 +1912,7 @@ e_fp pic_1d(loops_params *p) {
         }
 
         for (k=0; k<n; k+=vl) {
-            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n));
+            __asm__ volatile("vsetvli %0, %1, e32, m8, ta, ma" : "=r"(vl) : "r"(n-k));
 
             __asm__ volatile("vle32.v v0 (%0)" : : "r"(xx+k)); // xx[k]
             __asm__ volatile("vle32.v v8 (%0)" : : "r"(xi+k)); // xi[k]
@@ -2043,6 +2043,78 @@ e_fp casual(loops_params *p) {
 		reinit_vec(p,vh,nz*7);
 		reinit_vec(p,vf,nz*7);
 		reinit_vec(p,vg,nz*7);
+        #if USE_RVV
+        size_t vl;
+        // Consists of two parallel calculations
+        // Find vy and vs from unchanging input data
+        // vh, vf -> vy; vh, vf, vg -> vs
+
+        // Rows generally longer than columns so vectorize over them.
+        int row, curr;
+        for (j=1; j<ng-1; j++) {
+            row = j*nz;
+            for (k=1; k<nz; k+=vl) {
+                curr = row+k;
+                // Only consider current row to avoid loading first element of a row
+                __asm__ volatile("vsetvli %0, %1, e32, m4, ta, mu" : "=r"(vl) : "r"(nz-k));
+
+                // Mask to be used for vs calculations since some interspersed elements should be set to 0
+                __asm__ volatile("vid.v v28                 \n\t"
+                                "vadd.vx v28, v28, %0       \n\t" // k
+                                "vmslt.vx v0, v28, %1       \n\t" // If k+1<nz
+                                : : "r"(k+1), "r"(nz));
+
+                // Masks for outermost if statements for vs and vy
+                __asm__ volatile("vle32.v v24, (%0)" : : "r"(vf+curr)); // vf[cur]
+                __asm__ volatile("vle32.v v20, (%0), v0.t" : : "r"(vf+curr-nz)); // vf[up]
+                __asm__ volatile("vmflt.vv v2, v24, v20, v0.t"); // vf[cur]<vf[up] (vs outer mask)
+                __asm__ volatile("vfslide1up.vf v16, v24, %0" : : "f"(vf[curr-1])); // vf[left]
+                __asm__ volatile("vmflt.vv v1, v24, v16"); // vf[cur]<vf[left] (vy outer mask)
+
+                // Inner if statement: vs
+                __asm__ volatile("vmmv.m v3, v0");
+                __asm__ volatile("vmand.mm v0, v2, v0");
+                // if v0 set s to vf[up] else leave it vf[cur]
+                __asm__ volatile("vmv.v v24, v20, v0.t");
+                // if v0 set t to br instead of ar
+                __asm__ volatile("vfmv.v.f v16, %0" : : "f"(ar));
+                __asm__ volatile("vfmv.v.f v16, %0, v0.t" : : "f"(br));
+                // For each element, put vg[up or cur] into one vector and vg[up+1 or cur+1] into the other
+                __asm__ volatile("vle32.v v4, (%0)" : : "r"(vg+up));
+                __asm__ volatile("vle32.v v8, (%0)" : : "r"(vg+cur));
+                __asm__ volatile("vmv.v v12, v8");
+                __asm__ volatile("vmv.v v12, v4, v0.t"); // cur or up depending on vf[cur]<vf[up]
+                //TODO: cur+1 and up+1 will currently be invalid when last element is end of loop
+                __asm__ volatile("vfslide1down.vf v8, v8, %0" : : "f"(vg[cur+1])); // cur+1
+                __asm__ volatile("vfslide1down.vf v4, v4, %0" : : "f"(vg[up+1])); // up+1
+                __asm__ volatile("vmv.v v8, v4, v0.t"); // cur+1 or up+1 depending on up/cur
+                // Compare elements of vg[up/cur] vs vg[up+1/cur+1] to decide which to keep
+                __asm__ volatile("vmslt.vv v0, v8, v12"); // if vg[up+1/cur+1] < vg[up/cur]
+                __asm__ volatile("vmv.v v8, v12, v0.t"); // r
+
+                // Calculate vs using parameters
+                // vs[cur] = th_sqrt( vh[cur]*vh[cur] + r*r )* t / s;
+                // Must remain 0 when k+1>=nz
+                __asm__ volatile("vfmv.v.f v4, %0" : : "f"(0.0)); // Set to 0 when k+1>=nz
+                __asm__ volatile("vmnot.m v0, v2");
+                __asm__ volatile("vle32.v v4, (%0), v0.t" : : "r"(vh+cur));
+                __asm__ volatile("vfmul.vv v4, v4, v4, v0.t"); //vh[cur]^2
+                __asm__ volatile("vfmacc.vv v4, v8, v8, v0.t"); // vh[cur]^2+r^2
+                __asm__ volatile("vfsqrt.vv v4, v4, v0.t"); // sqrt(vh[cur]^2+r^2)
+                __asm__ volatile("vfmul.vv v4, v4, v16, v0.t"); // sqrt(vh[cur]^2+r^2)*t
+                __asm__ volatile("vfdiv.vv v4, v4, v24, v0.t"); // sqrt(vh[cur]^2+r^2)*t/s
+                __asm__ volatile("vse32.v v4, (%0)" : : "r"(vs+cur)); // vs[cur]=...
+            }
+        }
+        // Vectorize the last row, which is always skipped over and filled with 0s
+        // if j+1>=ng vy[cur]=0.0; continue;
+        for (i=1; i<nz-1; i += vl) {
+            __asm__ volatile("vsetvli %0, %1, e32, m4, ta, ma" : "=r"(vl) : "r"(nz-i));
+            __asm__ volatile("vfmv.v.f v4, %0" : : "r"(0.0));
+            __asm__ volatile("vse32.v v4, (%0)" : : "r"(vy+j*nz+i));
+        }
+
+        #else
         for ( j=1 ; j<ng ; j++ ) {
             for ( k=1 ; k<nz ; k++ ) {
 				int cur=j*nz+k;
@@ -2097,6 +2169,7 @@ e_fp casual(loops_params *p) {
                 vs[cur] = th_sqrt( vh[cur]*vh[cur] + r*r )* t / s;
             }
         }
+        #endif
 		/* Save some value of the output so compiler does not optimize the compute workload away */
 		test+=get_array_feedback(vs,nz*ng);
 		test+=get_array_feedback(vy,nz*ng);
