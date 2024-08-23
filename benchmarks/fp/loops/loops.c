@@ -2050,60 +2050,131 @@ e_fp casual(loops_params *p) {
         // vh, vf -> vy; vh, vf, vg -> vs
 
         // Rows generally longer than columns so vectorize over them.
-        int row, curr;
+        int row, curr, up;
         for (j=1; j<ng-1; j++) {
             row = j*nz;
             for (k=1; k<nz; k+=vl) {
+                // VECTOR REGISTERS
+                // Uses of vectors between different paragraphs
+                // v0: Used for current mask register
+                // v1: [Removed] k+1>=nz (whether to calculate vs element or set to 0)
+                // v2: vf[cur]<vf[left] (how to set vars for vy calculations)
+                // v3: vf[cur]<vf[up] (how to set vars for vs calculations)
+                // v4: vf[cur], vy_s
+                // v8: vf[up], vs_s
+                // v12: vy_t
+                // v16: vs_t
+                // v20: vf[left], vg[cur], vg[cur/up]
+                // v24: vh[down] and vg[cur+1/up+1] used for vy and vs conditionals respectively, r
+                // v28: vh[cur] for vy conditionals and vs calculations respectively
+                
                 curr = row+k;
+                up = curr-nz;
+                down = curr+nz;
                 // Only consider current row to avoid loading first element of a row
                 __asm__ volatile("vsetvli %0, %1, e32, m4, ta, mu" : "=r"(vl) : "r"(nz-k));
+                // Allows storing whether we hit the end of the row (so vs[cur]=0) should be 0
+                char rowEndBool = nz-1<=k+vl;
 
-                // Mask to be used for vs calculations since some interspersed elements should be set to 0
+                /* Removed mask: replaced by rowEndBool
+                // Mask to represent whether an element is at the end of its row
+                // Used for vs calculations since some interspersed elements should be set to 0
                 __asm__ volatile("vid.v v28                 \n\t"
-                                "vadd.vx v28, v28, %0       \n\t" // k
+                                "vadd.vx v28, v28, %0       \n\t" // k+1
                                 "vmslt.vx v0, v28, %1       \n\t" // If k+1<nz
                                 : : "r"(k+1), "r"(nz));
+                __asm__ volatile("vmmv.m v1, v0"); // Copy to v1*/
 
-                // Masks for outermost if statements for vs and vy
-                __asm__ volatile("vle32.v v24, (%0)" : : "r"(vf+curr)); // vf[cur]
-                __asm__ volatile("vle32.v v20, (%0), v0.t" : : "r"(vf+curr-nz)); // vf[up]
-                __asm__ volatile("vmflt.vv v2, v24, v20, v0.t"); // vf[cur]<vf[up] (vs outer mask)
-                __asm__ volatile("vfslide1up.vf v16, v24, %0" : : "f"(vf[curr-1])); // vf[left]
-                __asm__ volatile("vmflt.vv v1, v24, v16"); // vf[cur]<vf[left] (vy outer mask)
+                // Calculate masks from vf for outer conditionals
+                // Store: v2, v3; v4: vf[cur]; v8: vf[up]; v20: vf[left];
+                __asm__ volatile("vle32.v v4, (%0)" : : "r"(vf+curr)); // vf[cur]
+                __asm__ volatile("vle32.v v8, (%0)" : : "r"(vf+up)); // vf[up]
+                __asm__ volatile("vfslide1up.vf v20, v4, %0" : : "f"(vf[curr-1])); // vf[left]
+                __asm__ volatile("vmflt.vv v3, v4, v8"); // vf[cur]<vf[up] (vs outer mask)
+                __asm__ volatile("vmflt.vv v2, v4, v20"); // vf[cur]<vf[left] (vy outer mask)
 
-                // Inner if statement: vs
-                __asm__ volatile("vmmv.m v3, v0");
-                __asm__ volatile("vmand.mm v0, v2, v0");
-                // if v0 set s to vf[up] else leave it vf[cur]
-                __asm__ volatile("vmv.v v24, v20, v0.t");
-                // if v0 set t to br instead of ar
-                __asm__ volatile("vfmv.v.f v16, %0" : : "f"(ar));
-                __asm__ volatile("vfmv.v.f v16, %0, v0.t" : : "f"(br));
-                // For each element, put vg[up or cur] into one vector and vg[up+1 or cur+1] into the other
-                __asm__ volatile("vle32.v v4, (%0)" : : "r"(vg+up));
-                __asm__ volatile("vle32.v v8, (%0)" : : "r"(vg+cur));
-                __asm__ volatile("vmv.v v12, v8");
-                __asm__ volatile("vmv.v v12, v4, v0.t"); // cur or up depending on vf[cur]<vf[up]
-                //TODO: cur+1 and up+1 will currently be invalid when last element is end of loop
-                __asm__ volatile("vfslide1down.vf v8, v8, %0" : : "f"(vg[cur+1])); // cur+1
-                __asm__ volatile("vfslide1down.vf v4, v4, %0" : : "f"(vg[up+1])); // up+1
-                __asm__ volatile("vmv.v v8, v4, v0.t"); // cur+1 or up+1 depending on up/cur
-                // Compare elements of vg[up/cur] vs vg[up+1/cur+1] to decide which to keep
-                __asm__ volatile("vmslt.vv v0, v8, v12"); // if vg[up+1/cur+1] < vg[up/cur]
-                __asm__ volatile("vmv.v v8, v12, v0.t"); // r
+                // Load vh elements for finding vy_t and vy_r
+                // Store: v24: vh[down]; v28: vh[curr];
+                __asm__ volatile("vle32.v v24, (%0)" : : "r"(vh + down)); // vh[down]
+                __asm__ volatile("vle32.v 28, (%0)" : : "r"(vh + curr)); // vh[curr]
 
-                // Calculate vs using parameters
-                // vs[cur] = th_sqrt( vh[cur]*vh[cur] + r*r )* t / s;
-                // Must remain 0 when k+1>=nz
-                __asm__ volatile("vfmv.v.f v4, %0" : : "f"(0.0)); // Set to 0 when k+1>=nz
-                __asm__ volatile("vmnot.m v0, v2");
-                __asm__ volatile("vle32.v v4, (%0), v0.t" : : "r"(vh+cur));
-                __asm__ volatile("vfmul.vv v4, v4, v4, v0.t"); //vh[cur]^2
-                __asm__ volatile("vfmacc.vv v4, v8, v8, v0.t"); // vh[cur]^2+r^2
-                __asm__ volatile("vfsqrt.vv v4, v4, v0.t"); // sqrt(vh[cur]^2+r^2)
-                __asm__ volatile("vfmul.vv v4, v4, v16, v0.t"); // sqrt(vh[cur]^2+r^2)*t
-                __asm__ volatile("vfdiv.vv v4, v4, v24, v0.t"); // sqrt(vh[cur]^2+r^2)*t/s
-                __asm__ volatile("vse32.v v4, (%0)" : : "r"(vs+cur)); // vs[cur]=...
+                // Set s and t using vf masks
+                // Store: v0, v12, v16 (for vy_t and vs_t)
+                // Free: v20
+                // vs
+                // Get s by selectively replacing vf[up] with vf[cur]
+                __asm__ volatile("vmnot.m v0, v3    \n\t" // Invert mask to allow moving v4 as not to overwrite it
+                                    "vmv.v v8, v4, v0.t");
+                // Get t by selectively replacing br with ar
+                __asm__ volatile("vfmv.v.f v16, %0  \n\t"
+                                    "vfmv.v.f v16, %1, v0.t" : : "r"(br), "r"(ar));
+                // vy
+                // Get t by selectively replacing br with ar
+                __asm__ volatile("vmflt.vv v0, v28, v24 \n\t" // vh[down]>vh[cur]
+                                    "vfmv.v.f v12, %0   \n\t"
+                                    "vfmv.v.f v12, %1, v0.t" : : "r"(br), "r"(ar));
+                // Get s by selectively replacing vf[cur] with vf[left]
+                __asm__ volatile("vmmv.m v0, v2         \n\t" // Load v2 at the end for use in finding vy_r
+                                    "vmv.v v4, v20, v0.t");
+
+
+                // vy: Select whether each vh element is from left and down-1 or cur and down (using v2)
+                // Store: v20= vh[cur] or vh[left]; v24= vh[down] or vh[down-1]
+                // Free: v0, v2
+                __asm__ volatile("vmv.v v20, v28"); // Keep v28 unchanged for later use
+                __asm__ volatile("vfslide1down.vf v24, v24, %0, v0.t" : : "f"(vh[down-1])); // vh down or down-1
+                __asm__ volatile("vfslide1down.vf v20, v20, %0, v0.t" : : "f"(vh[curr-1])); // vh cur or left
+
+                // vy: Compare the pairs to find vy_r
+                // Free: v20
+                __asm__ volatile("vmflt.vv v0, v24, v20     \n\t" // vh[cur]>vh[down] / vh[left]>vh[down-1]
+                                    "vmv.v v24, v20, v0.t"); // Load vh left/down-1 in place of cur/down when vh[cur/left]>vh[down/down-1]
+
+                // vy: Use vy_r, vy_t, and vy_s to calculate the vy output
+                // Store: v20 (this will be kept for setting vs values)
+                // Free: v4, v12, v24
+                __asm__ volatile("vle32.v v20, (%0)" : : "r"(vg+curr)); // vg[cur]
+                __asm__ volatile("vfmul.vv v24, v24, v24"); // r*r
+                __asm__ volatile("vfmacc.vv v24, v20, v20"); // r*r+vg[cur]*vg[cur]
+                __asm__ volatile("vfsqrt.vv v24, v24"); // sqrt(r*r+vg[cur]*vg[cur])
+                __asm__ volatile("vfmul.vv v24, v24, v12"); // ... * t
+                __asm__ volatile("vfdiv.vv v24, v24, v4"); // ... / s
+                __asm__ volatile("vse32.v v24, (%0)" : : "r"(vy+curr)); // vy[cur] = ...
+
+
+                // vs: Check whether to process last element of vector
+                size_t vs_vl = vl;
+                if (rowEndBool) {
+                    // Should return vl-1
+                    __asm__ volatile("vlsetvli %0, %1, e32, m8, ta, mu" : "=r"(vs_vl): "r"(vl-1));
+                    vs[row+nz-1] = 0;
+                }
+
+                // vs: Select whether to use vg elements from cur/cur+1 or up/up+1
+                // Choose row before column, unlike when setting vy_r
+                // Find two consecutive elements in vg for each output in vs
+                // Store: v24
+                // Free: v3
+                __asm__ volatile("vle32.v v12, (%0)" : : "r"(vg+up)); // vg[up]
+                __asm__ volatile("vmmv.m v0, v3"); // when vf[cur]<vf[up]
+                __asm__ volatile("vfslide1down.vf v24, v20, %0" : : "r"(vg[curr+vs_vl]));
+                __asm__ volatile("vfslide1down.vf v16, v12, %0" : : "r"(vg[up+vs_vl]));
+                __asm__ volatile("vmv.v v20, v12, v0.t"); // vg cur or up
+                __asm__ volatile("vmv.v v24, v16, v0.t"); // vg cur+1 or up+1
+
+                // vs: Compare the pairs to find vs_r
+                // Free: v20
+                __asm__ volatile("vmflt.vv v0, v24, v20     \n\t"   // vg[cur+1/up+1] < vg[cur/up]
+                                    "vmv.v v24, v20, v0.t");        // Load vg cur/up in place of cur+1/up+1
+                
+                // vs: Use vs_r, vs_t, and vs_s to calculate the vs output
+                // Free: v8, v16, v24, v28
+                __asm__ volatile("vfmul.vv v28, v28, v28    \n\t"       // vh[cur]*vh[cur]
+                                    "vfmadd.vv v24, v24, v28\n\t"       // vh[cur]*vh[cur]+r*r
+                                    "vfsqrt.vv v24, v24     \n\t"       // sqrt(vh[cur]*vh[cur]+r*r)
+                                    "vfmul.vv v24, v24, v16 \n\t"       // ... * t
+                                    "vfmul.vv v24, v24, v8  \n\t");     //... / s
+                __asm__ volatile("vse32.v v24, (%0)" : : "r"(vs+curr)); // vs[cur] = ...
             }
         }
         // Vectorize the last row, which is always skipped over and filled with 0s
