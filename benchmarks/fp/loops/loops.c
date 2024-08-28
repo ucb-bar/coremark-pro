@@ -2509,6 +2509,218 @@ e_fp hydro_2d(loops_params *p) {
         int jn = n;
         t = 0.0000037;
         s = 0.0000041;
+        #if USE_RVV
+        // The three loops are preserved separately instead of combined
+        int up, down, cur;
+        size_t vl;
+        for (k=1;k<kn;k++) {
+            // Avoid first column and row
+            for (j=1;j<jn;j+=vl) {
+                __asm__ volatile("vsetvli %0, %1, e32, m4, ta, mu" : : "r"(vl), "r"(jn-j)); // mu for overwriting with 1.0 at the end
+                cur = k*jn+j;
+                down = (k-1)*jn+j;
+                up = (k+1)*jn + j;
+                
+                // First parentheses
+                // Load
+                // v0,4,8: zp[cur], zp[cur-1], zp[down-1]
+                // v12,16,20: zq[cur], zq[cur-1], zq[down-1]
+                __asm__ volatile("vle32.v v0, (%0)      \n\t"           // v0= zp[cur]
+                                "vle32.v v8, (%1)       \n\t"           // v8= zp[down-1]
+                                "vle32.v v12, (%2)       \n\t"          // v12= zq[cur]
+                                "vle32.v v20, (%3)"                     // v20= zq[down-1]
+                                    : : "r"(zp+cur), "r"(zp+down-1), "r"(zq+cur), "r"(zq+down-1));
+                __asm__ volatile("vfslide1up.vf v4, v0, (%0)    \n\t"   // v4= zp[cur-1]
+                                "vfslide1up.vf v16, v12, %1"          // v16= zq[cur-1]
+                                    : : "f"(zp[cur-1]), "f"(zq[cur-1]));
+
+                // Must preserve floating point addition order
+                // Partial results for za in v24
+                __asm__ volatile("vfadd.vv v24, v8, v20     \n\t"
+                                "vfsub.vv v24, v24, v4      \n\t"
+                                "vfsub.vv v24, v24, v16");          // v24= zp[down-1]+zq[down-1]-zp[cur-1]-zq[cur-1]
+                // Partial results for zb in v28
+                __asm__ volatile("vfadd.vv v28, v4, v16     \n\t"
+                                "vfsub.vv v28, v28, v0      \n\t"
+                                "vfsub.vv v28, v28, v12");          // v28= zp[cur-1]+zq[cur-1]-zp[cur]-zq[cur]
+
+                // Second parentheses
+                // Load zr[cur-1], zr[up], zr[cur] into v4, v8, v20
+                __asm__ volatile("vle32.v v20, (%0)          \n\t"  // zr[cur]
+                                "vle32.v v8, (%1)"                  // zr[up]
+                                    : : "r"(zr+cur), "r"(zr+up));
+                __asm__ volatile("vfslide1up.vf v4, v20, %0" : : "f"(zr[cur-1]));
+                // Calculate
+                __asm__ volatile("vfadd.vv v4, v4, v20  \n\t"
+                                "vfadd.vv v8, v8, v20");
+                __asm__ volatile("vfmul.vv v24, v24, v4 \n\t"       // v24 *= (zr[cur]+zr[cur-1])
+                                "vfmul.vv v28, v28, v8");           // v28 *= (zr[cur]+zr[up])
+
+                // Third parentheses
+                // Load zm[cur-1], zm[cur], zm[down-1] into v0, v12, v16
+                __asm__ volatile("vle32.v v12, (%0)         \n\t"   // zm[cur]
+                                "vle32.v v16, (%1)          \n\t"   // zm[down-1]
+                                "vfslide1up.vf v0, v16, %2"
+                                    : : "r"(zm+down-1), "r"(zm+cur), "f"(zm[cur-1]));
+                // Calculate
+                __asm__ volatile("vfadd.vv v12, v0, v12     \n\t"
+                                "vfadd.vv v16, v16, v0");
+                __asm__ volatile("vfdiv.vv v24, v24, v12    \n\t"   // v24 /= (zm[cur-1]+zm[down-1])
+                                "vfdiv.vv v28, v28, v16");          // v28 /= (zm[cur]+zm[cur-1])
+
+                // Finite check
+                // th_isfinite
+                __asm__ volatile("vfclass.v v4, v24         \n\t"
+                                "vfclass.v v8, v28");
+                // Only set bits corresponding to classes of finite values
+                __asm__ volatile("vand.vx v4, v4, %0        \n\t"
+                                "vand.vx v8, v8, %0"
+                                    : : "r"(0b1011010)); // finite defined by th_isfinite being +- 0 and +- normal numbers
+                // Set to 1.0 where result would otherwise not be finite
+                __asm__ volatile("vmseq.vi v0, v4, 0        \n\t" // Check when no finite bits set
+                                "vfmv.v.f v24, %0, v0.t     \n\t" // In those cases replace with 1.0
+                                "vmseq.vi v0, v8, 0        \n\t"
+                                "vfmv.v.f v28, %0, v0.t"
+                                    : : "f"(1.0));
+
+                // Store
+                __asm__ volatile("vse32.v v24, (%0)         \n\t"   // za[cur]= v24
+                                "vse32.v v28, (%1)"                 // zb[cur]= v28
+                                    : : "r"(za+cur), "r"(zb+cur));
+            }
+        }
+        // Hold variables to the left, preceding current vector, that were loaded in previously
+        // Current solution to avoid some redundant consecutive loads
+        e_fp za_prev, zz_left, zr_left, zz_left2, zr_left2;
+        __asm__ volatile("")
+        for (k=1;k<kn;k++) {
+            // Avoid first column and row
+            // Load in zz and zr cur -1
+            __asm__ volatile("vfmv.s.f v8, %0"
+                            "vfmv.s.f v12, %1"
+                                : : "f"(zz+k*jn), "f"(zz+k*jn+1));
+            __asm__ volatile("vfmv.s.f v20, %0"
+                            "vfmv.s.f v24, %1"
+                                : : "f"(zr+k*jn), "f"(zr+k*jn+1));
+            za_prev = za[k*jn];
+            zz_left = zz[k*jn], zr_left = zr[k*jn];
+            zz_left2 = zz[k*jn-1], zr_left2 = zr[k*jn-1];
+            for (j=1;j<jn;j+=vl) {
+                // No end-of-row checks required
+                __asm__ volatile("vsetvli %0, %1, e32, m4, ta, ma" : : "r"(vl), "r"(jn-j));
+                cur = k*jn+j;
+                down = cur+jn;
+                up = cur-jn;
+                right = cur+1;
+
+                // Registers
+                // v0-v12: Store zz/zr values and their differences with zz/zr [cur]. Store products for zu calculations.
+                // v16-v28: Hold za/zb values. Store their products for zv calculations once done with them.
+
+                // zu
+                // Load zz and factors za[cur], za[cur-1]
+                __asm__ volatile("vle32.v v0, (%0)  \n\t"       // zz[cur+1]
+                                "vle32.v v4, (%1)   \n\t"       // zz[up]
+                                "vle32.v 8, (%2)"               // zz[down]
+                                    : : "f"(zz+right), "f"(zz+up), "f"(zz+down));
+                __asm__ volatile("vfslide1up.vx v28, v0, %0" : : "f"(zz_left));     // zz[cur]
+                __asm__ volatile("vle32.v v20, (%0)     \n\t"   // za[cur]
+                                "vfslide1up.vx v24, v20, %1"    // za[cur-1]
+                                    : : "r"(za+cur), "f"(za[cur-1]));
+                __asm__ volatile("vfslide1up.vx v12, v28, %0" : : "f"(zz_left2));    // zz[cur-1]
+                // Save last two elements of zz[cur+1] for next loop
+                __asm__ volatile("vslidedown.vx v16, v0, %0" : : "r"(vl-2));
+                __asm__ volatile("vfmv.f.s %0, v16" : "=f"(zz_left2));
+                __asm__ volatile("vslidedown.vi v16, v16, 1     \n\t"
+                                "vfmv.f.s %0, v16" : "=f"(zz_left));
+
+                // Subtractions from inner parentheses of original code
+                __asm__ volatile("vfsub.vv v0, v28, v0");       // zz[cur]-zz[cur+1]
+                __asm__ volatile("vfsub.vv v12, v28, v12");     // zz[cur]-zz[cur-1]
+                __asm__ volatile("vfsub.vv v4, v28, v4");       // zz[cur]-zz[up]
+                __asm__ volatile("vfsub.vv v8, v28, v8");       // zz[cur]-zz[down]
+
+                // Multiply and add together
+                // Intersperse with loads of multiplicands as registers are freed
+                __asm__ volatile("vfmul.vv v0, v20, v0");   // za[cur]*(zz[cur]-zz[cur+1])
+                __asm__ volatile("vle32.v v16, (%0)" : : "r"(zb+cur));  // zb[cur]
+                __asm__ volatile("vfmsac.vv v0, v24, v12"); // ... - za[cur-1]*(zz[cur]-zz[cur-1])
+                __asm__ volatile("vle32.v v28, (%0)" : : "r"(zb+down)); // zb[down]
+                __asm__ volatile("vfmsac.vv v0, v16, v4");  // ... - zb[cur]*(zz[cur]-zz[up])
+                __asm__ volatile("vle32.v v12, (%0)" : : "r"(zu+cur));   // zu[cur]
+                __asm__ volatile("vfmacc.vv v0, v28, v8");  // ... + zb[down]*(zz[cur]-zz[down])
+                __asm__ volatile("vfmadd.vx v0, %0, v12" : : "r"(s)); // zu[cur]+s*...
+                __asm__ volatile("vse32.v v0, (%0)" : : "r"(zu+cur));   // Store zu[cur]
+
+                // zv
+                // Load from zr
+                __asm__ volatile("vle32.v v12, (%0)" : : "r"(zr+right));                 // zr[cur+1]
+                __asm__ volatile("vslide1up.vx v8, v12, %0" : : "f"(zr_left));           // zr[cur]
+                __asm__ volatile("vslide1up.vx v4, v8, %0" : : "f"(zr_left2));          // zr[cur-1]
+
+                // Save last two elements of zr[cur+1] for next loop
+                __asm__ volatile("vfslidedown.vx v0, v12, %0" : : "r"(vl-2));
+                __asm__ volatile("vfmv.f.s %0, v0" : "=f"(zr_left2));
+                __asm__ volatile("vfslidedown.vi v0, v0, 1");
+                __asm__ volatile("vfmv.f.s %0, v0" : "=f"(zr_left));
+
+                // Calculations
+                // Intersperse with loads of zr values as registers are freed
+                __asm__ volatile("vfsub.vv v12, v8, v12");          // zr[cur]-zr[cur+1]
+                __asm__ volatile("vfmul.vv v20, v20, v12");         // za[cur] * ...
+                __asm__ volatile("vle32.v v0, (%0)" : : "r"(zr+up));    // zr[up]
+                __asm__ volatile("vfsub.vv v4, v8, v4");            // zr[cur]-zr[cur-1]
+                __asm__ volatile("vfmsac.vv v20, v24, v4");         // ... - za[cur-1]*(zr[cur]-zr[cur-1])
+                __asm__ volatile("vle32.v v12, (%0)" : : "r"(zr+down)); // zr[down]
+                __asm__ volatile("vfsub.vv v0, v8, v0");            // zr[cur]-zr[up]
+                __asm__ volatile("vfmsac.vv v20, v16, v0");         // ... - zb[cur]*(zr[cur]-zr[up])
+                __asm__ volatile("vle32.v v4, (%0)" : : "r"(zv+cur));   // zv[cur]
+                __asm__ volatile("vfsub.vv v12, v8, v12");          // zr[cur]-zr[down]
+                __asm__ volatile("vfmacc.vv v20, v28, v12");        // ... + zb[down]*(zr[cur]-zr[down])
+                __asm__ volatile("vfmacc.vx v4, %0, v20" : : "r"(s));   // zv[cur] + s*...
+                __asm__ volatile("vse32.v v4, (%0)" : : "r"(zv+cur));   // Store zv[cur]
+            }
+        }
+
+        for (k=1;k<kn;k++) {
+            // Avoid first column and row
+            for (j=1;j<jn;j+=vl) {
+                __asm__ volatile("vsetvli %0, %1, e32, m8, ta, mu" : : "r"(vl), "r"(jn-j));
+                cur = k*jn+j;
+                // Load
+                __asm__ volatile("vle32.v v0, (%0)      \n\t"
+                                "vle32.v v8, (%1)"
+                                    : : "r"(zu+cur), "r"(zr+cur));
+                __asm__ volatile("vle32.v v16, (%0)     \n\t"
+                                "vle32.v v24, (%1)"
+                                    : : "r"(zv+cur), "r"(zz+cur));
+
+                // Calculate
+                __asm__ volatile("vfmacc.vf v8, %0, v0" : : "f"(t));
+                __asm__ volatile("vfmacc.vf v24, %0, v16" : : "f"(t));
+
+                // Check th_isfinite
+                __asm__ volatile("vfclass.v v0, v8          \n\t"
+                                "vfclass.v v16, v24");
+                __asm__ volatile("vand.vx v0, v0, %0        \n\t"
+                                "vand.vx v16, v16, %0"
+                                    : : "r"(0b1011010));
+                // Overwrite with 1.0 if not finite
+                __asm__ volatile("vmseq.vi v0, v0, 0        \n\t" // Check when no finite bits set
+                                "vfmv.v.f v8, %0, v0.t      \n\t" // In those cases replace with 1.0
+                                "vmseq.vi v0, v16, 0        \n\t"
+                                "vfmv.v.f v24, %0, v0.t"
+                                    : : "f"(1.0));
+
+                // Store
+                __asm__ volatile("vse32.v v8, (%0)" : : "r"(zr+cur));
+                __asm__ volatile("vse32.v v24, (%0)" : : "r"(zz+cur));
+
+            }
+        }
+
+
+        #else
         for ( k=1 ; k<kn ; k++ ) {
           for ( j=1 ; j<jn ; j++ ) {
 			int up=(k-1)*jn+j;
@@ -2546,6 +2758,7 @@ e_fp hydro_2d(loops_params *p) {
 			  if (!th_isfinite(zz[cur])) zz[cur]=FPCONST(1.0);
             }
         }
+        #endif
 		ret+=get_array_feedback(zr,kn*jn);
 		ret+=get_array_feedback(zz,kn*jn);
     }
@@ -2820,7 +3033,7 @@ e_fp firstmin(loops_params *p) {
 
             // For each element, if v0, then
             // Track the element x[k]
-            __asm__ volatile("vmv.vv v16, v24, v0.t");
+            __asm__ volatile("vmv.v.v v16, v24, v0.t");
             // Track its index k
             __asm__ volatile("vid.v v8, v0.t"); // index offsets from k [0, 1, 2...]
             __asm__ volatile("vadd.vx v8, v8, %0, v0.t" : : "r"(k)); // k
