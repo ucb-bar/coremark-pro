@@ -2953,6 +2953,7 @@ e_fp planckian(loops_params *p) {
     }
 	return ret;
 }
+        #define USE_RVV 1
 
 e_fp hydro_2d_implicit(loops_params *p) {
 	e_fp *za=p->m2[0];
@@ -2983,6 +2984,96 @@ e_fp hydro_2d_implicit(loops_params *p) {
      */
 
     for ( l=1 ; l<=loop ; l++ ) {
+        #if USE_RVV
+        // Processing for each element expects left and up to have been processed but down and right not to have been
+        // Can't vectorize columns or rows, but can vectorize diagonals
+        // Processing one tile readies the tile to its right (if its above tile is processed) and the tile down (if its left is processed)
+        // Stays at min ng,nz for |ng-nz|+1
+        const unsigned int diagBytes = sizeof(e_fp) * (n-1);
+        size_t vl;
+        int rlen = n, clen = 6;     // Lengths of rows and cols
+
+        // Set variables to handle the different behavior as the diagonal passes each corner
+        int shortside, longside, middleinc;
+        shortside = clen;
+        longside = rlen;
+        middleinc = 1;
+        // Handle benchmark for any width and height
+        if (rlen < clen) {
+            shortside = rlen;
+            longside = clen;
+            middleinc = rlen;
+        }
+
+        // Number of diagonal and its length
+        unsigned int diag = 1;
+        unsigned int diag_len = 0;
+        unsigned int index = rlen;
+
+        void processDiagonal(unsigned long int startInd, unsigned int len) {
+            // Uses diagBytes as stride
+            // Handle diagonal in a loop in case too long for one vector
+            for (unsigned int rem = len; rem>0; rem-=vl) {
+                __asm__ volatile("vsetvli %0, %1, e32, m4, ta, ma" : "=r"(vl) : "r"(rem));
+
+                // Registers
+                //           v0       v4        v8     v12       v16       v20       v24       v28       v12
+                // e_fp qa = za[down]*zr[cur] + za[up]*zb[cur] + za[cur+1]*zu[cur] + za[cur-1]*zv[cur] + zz[cur];
+                //                                  v8
+                // za[cur] += FPCONST(0.175)*( qa - za[cur] );
+
+                // No indexed gather required because the matrix is stored in one array
+                __asm__ volatile("vlse32.v v0, (%0), %1" : : "r"(za+startInd+rlen), "r"(diagBytes));    // za[down]
+                __asm__ volatile("vlse32.v v4, (%0), %1" : : "r"(zr+startInd), "r"(diagBytes));         // zr[cur]
+                // za[cur-1] and za[cur] may have been loaded by previous diagonal
+                __asm__ volatile("vlse32.v v24, (%0), %1" : : "r"(za+startInd-rlen), "r"(diagBytes));   // za[cur-1]
+                __asm__ volatile("vfslide1up.vf v16, v0, %0" : : "f"(za[startInd+1]));                  // za[cur+1]
+                __asm__ volatile("vfmul.vv v4, v0, v4");            // za[down] * zr[cur]
+
+                // Left/up and right/down vectors are the same but shifted by one
+                __asm__ volatile("vlse32.v v12, (%0), %1" : : "r"(zb+startInd), "r"(diagBytes));        // zb[cur]
+                __asm__ volatile("vfslide1up.vf v8, v24, %0" : : "f"(za[startInd-rlen]));               // za[up]
+                __asm__ volatile("vlse32.v v20, (%0), %1" : : "r"(zu+startInd), "r"(diagBytes));        // zu[cur]
+                __asm__ volatile("vfmacc.vv v4, v8, v12");          // za[down]*zr[cur] + za[up] * zb[cur]
+
+                __asm__ volatile("vlse32.v v28, (%0), %1" : : "r"(zv+startInd), "r"(diagBytes));        // zv[cur]
+                __asm__ volatile("vfmacc.vv v4, v16, v20");         // ... + za[cur+1] * zu[cur]
+
+                __asm__ volatile("vlse32.v v12, (%0), %1" : : "r"(zz+startInd), "r"(diagBytes));        // zz[cur]
+                __asm__ volatile("vfmacc.vv v4, v24, v28");         // ... + za[cur-1] * zv[cur]
+                __asm__ volatile("vlse32.v v8, (%0), %1" : : "r"(za+startInd), "r"(diagBytes));         // za[cur]
+                __asm__ volatile("vfadd.vv v12, v4, v12");          // ... + zz[cur]
+
+                __asm__ volatile("vfsubb.vv v12, v12, v8");                 // qa-zc[cur]     
+                __asm__ volatile("vfmacc.vf v8, %0, v12" : : "f"(0.175));   // za[cur] + .175 * (qa-za[cur])
+                __asm__ volatile("vsse32.v v8, (%0), %1" : : "r"(za+startInd), "r"(diagBytes));         // za[cur] = za[cur] + .175 * (qa-za[cur])
+
+                startInd += vl*diagBytes;
+            }
+        }
+
+        // Diagonal grows by one until passing one dimension, stops between rlen and clen, and then decreases after
+        // Starting position of diagonal first moves right, then down once its start gets farther than row
+        // Before diagonal reaches a corner
+        for (;diag<shortside;diag++) {
+            // index and length start with 1 and only increment when you are able to move right
+            diag_len++;
+            index++;
+            processDiagonal(index, diag_len);
+        }
+        // After hitting one corner
+        for (;diag<longside;diag++) {
+            index+=middleinc;
+            processDiagonal(index, diag_len);
+        }
+        // After hitting two corners
+        for (;diag<longside+shortside-2; index+=rlen) {
+            diag_len--;
+            index += rlen;
+            processDiagonal(index, diag_len);
+        }
+
+        #else
         for ( j=1 ; j<6 ; j++ ) {
             for ( k=1 ; k<n ; k++ ) {
 				int cur=j*n+k;
@@ -2993,6 +3084,7 @@ e_fp hydro_2d_implicit(loops_params *p) {
                 za[cur] += FPCONST(0.175)*( qa - za[cur] );
             }
         }
+        #endif
     }
 	ret=get_array_feedback(za,n); /* return a value that depends on each compute in the loop */
 	return ret;
